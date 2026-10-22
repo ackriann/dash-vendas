@@ -1,0 +1,31 @@
+{
+  "name": "painel-vendas",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "vapid": "web-push generate-vapid-keys"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.6.7",
+    "server-only": "^0.0.1",
+    "stripe": "^23.0.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5"
+  }
+}
