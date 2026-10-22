@@ -22,15 +22,18 @@ const EVENT_STATUS: Record<string, SaleStatus> = {
  * O vid do script de rastreamento chega no parâmetro "custom".
  * A Digistore espera a resposta "OK" em texto puro.
  */
+export async function GET(req: Request) {
+  // Algumas configurações da Digistore testam a URL com GET: responde OK e registra
+  await logEvent("digistore", "GET", true, "a Digistore abriu a URL (GET) — os avisos de venda vêm por POST");
+  return text("OK");
+}
+
 export async function POST(req: Request) {
   const ct = req.headers.get("content-type") ?? "";
-  let params: Record<string, string> = {};
-  if (ct.includes("application/json")) {
-    params = await req.json().catch(() => ({}));
-  } else {
-    const form = await req.formData().catch(() => null);
-    form?.forEach((v, k) => (params[k] = String(v)));
-  }
+  const raw = await req.text().catch(() => "");
+  const params = parseBody(raw);
+  // Campos que vierem na própria URL (menos a chave) também valem
+  for (const [k, v] of new URL(req.url).searchParams) if (k !== "key" && !(k in params)) params[k] = v;
 
   // Vale a chave na URL (sem senha na Digistore) OU a assinatura SHA com a senha salva no painel
   const key = new URL(req.url).searchParams.get("key") ?? "";
@@ -47,7 +50,7 @@ export async function POST(req: Request) {
     return text("ERROR: unauthorized", 401);
   }
 
-  const event = params.event ?? "";
+  const event = (params.event ?? params.Event ?? params.ipn_event ?? params.event_type ?? "").trim();
   if (event === "connection_test") {
     await logEvent("digistore", event, true, "teste de conexão recebido");
     return text("OK");
@@ -55,7 +58,17 @@ export async function POST(req: Request) {
 
   const status = EVENT_STATUS[event];
   if (!status) {
-    await logEvent("digistore", event, true, "evento ignorado");
+    // Guarda o formato do aviso para dar para ver o que a Digistore mandou
+    const sample = Object.fromEntries(Object.entries(params).slice(0, 40).map(([k, v]) => [k, String(v).slice(0, 120)]));
+    await logEvent(
+      "digistore",
+      event || "?",
+      !!event,
+      event
+        ? `evento “${event}” recebido (não muda venda)`
+        : `aviso em formato desconhecido (sem o campo event) — ${Object.keys(params).length} campo(s), content-type ${ct || "vazio"}. Confira se a conexão é do tipo Generic.`,
+      { content_type: ct, method: req.method, fields: Object.keys(params), sample, raw: Object.keys(params).length ? undefined : raw.slice(0, 2000) },
+    );
     return text("OK");
   }
 
@@ -108,6 +121,24 @@ export async function POST(req: Request) {
     await logEvent("digistore", event, false, e?.message ?? "erro", params);
     return text("ERROR: falha ao processar", 500);
   }
+}
+
+/** Aceita o corpo como formulário (padrão da Digistore) ou JSON. */
+function parseBody(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const t = raw.trim();
+  if (t.startsWith("{")) {
+    try {
+      const j = JSON.parse(t);
+      const flat = j && typeof j === "object" && j.data && typeof j.data === "object" && !j.event ? { ...j.data, event: j.data.event ?? j.type } : j;
+      for (const [k, v] of Object.entries(flat ?? {})) out[k] = v !== null && typeof v === "object" ? JSON.stringify(v) : String(v ?? "");
+      return out;
+    } catch {
+      /* não era JSON: tenta como formulário */
+    }
+  }
+  for (const [k, v] of new URLSearchParams(t)) out[k] = v;
+  return out;
 }
 
 function text(body: string, status = 200) {
