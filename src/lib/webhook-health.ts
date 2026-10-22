@@ -18,6 +18,8 @@ export async function webhookHealth(filter: { source?: string; kind?: string }, 
     let b = db().from("events_log").select("created_at,kind,message").eq("ok", ok);
     if (filter.source) b = b.eq("source", filter.source);
     if (filter.kind) b = b.eq("kind", filter.kind);
+    // A Digistore abrindo a URL para validar (GET) não é aviso de venda
+    b = b.neq("kind", "GET");
     return b.order("created_at", { ascending: false }).limit(1).maybeSingle();
   };
   const [okRow, errRow] = await Promise.all([q(true), q(false)]);

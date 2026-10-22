@@ -5,6 +5,8 @@ import { db, getSetting } from "@/lib/db";
 import { PLATFORM_LABEL } from "@/lib/sales";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
+import Help from "@/components/Help";
+import Acc from "@/components/Acc";
 import { addFee, deleteFee, toggleFee, updateFee } from "./actions";
 
 const PRESETS: { name: string; kind: FeeKind; value: string; hint: string }[] = [
@@ -40,9 +42,21 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
 
   return (
     <div className="space-y-5 max-w-4xl">
-      <header>
-        <h1>Taxas e custos</h1>
-        <p className="sub">Tudo que sai do faturamento antes de virar lucro. Vale para o resumo, as campanhas e cada venda.</p>
+      <header className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1>Taxas e custos</h1>
+          <p className="sub">Tudo que sai do faturamento antes de virar lucro.</p>
+        </div>
+        <Help title="Como as taxas entram no lucro" label="Como funciona">
+          <ul>
+            <li><b>% sobre cada venda:</b> gateway, imposto sobre faturamento, coprodução.</li>
+            <li><b>Valor fixo por venda:</b> tarifa fixa do gateway, custo do produto, frete.</li>
+            <li><b>% sobre gasto em anúncios:</b> impostos cobrados pela Meta na fatura.</li>
+            <li><b>Custo fixo por dia:</b> ferramentas e equipe (custo mensal ÷ 30).</li>
+            <li>Dá para aplicar só numa plataforma ou só num produto.</li>
+            <li>Vale para o Resumo, Campanhas e cada venda. Mudar uma taxa recalcula todo o histórico.</li>
+          </ul>
+        </Help>
       </header>
       <Notice ok={sp.ok} erro={sp.erro} />
 
@@ -87,9 +101,9 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
         </table>
       </section>
 
-      <section className="grid md:grid-cols-[1fr_320px] gap-4 items-start">
-        <form action={addFee} className="panel panel-pad grid sm:grid-cols-2 gap-3">
-          <h2 className="sm:col-span-2">Adicionar taxa</h2>
+      <section>
+        <Acc title="Adicionar taxa" sub="Gateway, imposto, custo do produto…" open={!fees.length}>
+        <form action={addFee} className="grid sm:grid-cols-2 gap-3">
           <label className="field sm:col-span-2"><span className="label">Nome</span><input className="input" name="name" placeholder="Ex.: Taxa da Hotmart" required /></label>
           <label className="field"><span className="label">Tipo</span>
             <select className="select" name="kind" defaultValue="percent_sale">
@@ -109,10 +123,10 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
           </label>
           <div className="sm:col-span-2"><SubmitButton className="btn btn-primary" pendingText="Adicionando…">Adicionar taxa</SubmitButton></div>
         </form>
+        </Acc>
 
-        <div className="space-y-4">
-          <div className="panel panel-pad">
-            <h3 className="mb-2">Atalhos comuns</h3>
+        <Acc title="Atalhos comuns" sub="Adicione com um clique e ajuste o valor">
+          <div>
             <ul className="space-y-2">
               {PRESETS.map((p) => (
                 <li key={p.name} className="flex items-center justify-between gap-2">
@@ -133,13 +147,15 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
             </ul>
             <p className="text-xs text-muted mt-3">Os valores são só ponto de partida. Ajuste para os da sua operação.</p>
           </div>
-          <div className="panel panel-pad text-sm">
-            <h3 className="mb-1">Na prática</h3>
+        </Acc>
+
+        <Acc title="Na prática" sub="Simulação de uma venda com as taxas atuais">
+          <div className="text-sm">
             <p className="text-muted">Uma venda de {fmtMoney(sim.gross, base)} que custou {fmtMoney(sim.spend, base)} em anúncio:</p>
             <p className="mt-2">Taxas: <span className="num">{fmtMoney(simFees, base)}</span></p>
             <p>Lucro real: <span className={`num font-semibold ${sim.gross - sim.spend - simFees < 0 ? "neg" : "pos"}`}>{fmtMoney(sim.gross - sim.spend - simFees, base)}</span></p>
           </div>
-        </div>
+        </Acc>
       </section>
     </div>
   );

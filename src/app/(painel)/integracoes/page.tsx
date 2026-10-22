@@ -10,6 +10,8 @@ import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
 import CopyButton from "@/components/CopyButton";
 import SubmitButton from "@/components/SubmitButton";
+import Help from "@/components/Help";
+import Acc from "@/components/Acc";
 import {
   addPixel, clearCheckout, connectDigistore, connectStripe, disconnectDigistore, deletePixel, disconnectStripe, newUniversalKey, saveDigistore,
   saveHotmart, saveStripeManual, setAutoCapi, setDefaultPixel, updatePixelTestCode,
@@ -247,137 +249,186 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     <div className="space-y-6 max-w-4xl">
       <header>
         <h1>Integrações</h1>
-        <p className="sub">Meta, checkouts, pixel e rastreamento.</p>
+        <p className="sub">Meta, pixel e checkouts. Clique em cada item para abrir.</p>
       </header>
       <Notice ok={sp.ok} erro={sp.erro} />
 
-      {/* ------------------------------------------------ Meta */}
-      <section className="panel panel-pad flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2>Meta Ads</h2>
-          <p className="sub">
-            {profiles.length
-              ? `${profiles.length} perfil(is) conectado(s) · ${enabledAccounts} conta(s) de anúncio no painel`
-              : "Conecte seus perfis com token + app para puxar gasto, campanhas e páginas."}
-          </p>
+      {/* ------------------------------------------------ Meta e rastreamento */}
+      <section>
+        <h2 className="mb-3">Meta</h2>
+        <div className="acc">
+          <Link href="/perfis" className="flex items-center gap-3 px-4 py-3.5 rounded-[14px] hover:bg-[#18303a]">
+            <span className="flex-1 min-w-0">
+              <span className="acc-title">Perfis e contas de anúncio</span>
+              <span className="acc-sub">
+                {profiles.length ? `${profiles.length} perfil(is) · ${enabledAccounts} conta(s) no painel` : "Nenhum perfil conectado"}
+              </span>
+            </span>
+            <span className={`pill ${profiles.length ? "pill-approved" : "pill-pending"}`}>{profiles.length ? "Conectado" : "Conectar"}</span>
+          </Link>
         </div>
-        <Link className={profiles.length ? "btn" : "btn btn-primary"} href="/perfis">{profiles.length ? "Gerenciar perfis" : "Conectar perfil"}</Link>
-      </section>
-
-      <section className="panel panel-pad flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2>Rastreamento (UTMs + script)</h2>
-          <p className="sub">Parâmetros dos anúncios, script da página de vendas e gerador de links.</p>
+        <div className="acc">
+          <Link href="/utms" className="flex items-center gap-3 px-4 py-3.5 rounded-[14px] hover:bg-[#18303a]">
+            <span className="flex-1 min-w-0">
+              <span className="acc-title">UTMs e script de rastreamento</span>
+              <span className="acc-sub">Parâmetros dos anúncios e gerador de links</span>
+            </span>
+            <span className="text-muted" aria-hidden>→</span>
+          </Link>
         </div>
-        <Link className="btn" href="/utms">Abrir UTMs</Link>
       </section>
 
       {/* ------------------------------------------------ Pixels */}
-      <section className="panel panel-pad space-y-4">
-        <div>
-          <h2>Pixel — API de Conversões</h2>
-          <p className="sub">O script de cada pixel carrega o pixel no site e manda os eventos também pelo servidor. O token é usado no Purchase (envio automático e botão “Disparar venda no pixel”).</p>
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <h2>Pixel</h2>
+          <Help title="Como funciona o pixel do painel">
+            <ul>
+              <li>O <b>código do pixel</b> vai no &lt;head&gt; de todas as páginas (presell, vendas, obrigado), <b>no lugar</b> do código do pixel da Meta.</li>
+              <li>Ele carrega o pixel e manda <b>PageView, ViewContent e InitiateCheckout</b> pelo navegador e pelo servidor, sem contar duas vezes.</li>
+              <li>Também guarda as UTMs da visita e passa para o checkout, para a venda cair na campanha certa.</li>
+              <li>O <b>Purchase</b> vai pelo servidor quando o checkout aprova a venda (com o envio automático ligado) ou pelo botão “Disparar venda no pixel”.</li>
+              <li>A Meta aceita eventos de até 7 dias e não conta a mesma venda duas vezes.</li>
+            </ul>
+          </Help>
         </div>
-        {pixels.length > 0 && (
-          <ul className="space-y-2">
-            {pixels.map((p) => (
-              <li key={p.id} className="border border-line rounded-xl p-3 flex flex-col md:flex-row md:items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold">{p.name} {p.is_default && <span className="pill pill-approved ml-1">padrão</span>}</p>
-                  <p className="text-xs text-muted">ID {p.pixel_id} · token …{p.access_token.slice(-6)}</p>
-                  <details className="mt-3" open={pixels.length === 1 || p.is_default}>
-                    <summary className="text-sm font-semibold text-profit">Código do pixel para o site</summary>
-                    <p className="text-xs text-muted mt-2">
-                      Cole na &lt;head&gt; de todas as páginas (presell, vendas, obrigado) no lugar do código do pixel da Meta. Ele carrega o pixel e manda
-                      PageView, ViewContent e InitiateCheckout pelo navegador e pelo servidor, e passa as UTMs para o checkout.
-                    </p>
-                    <code className="codebox mt-2 !text-[0.75rem]">{pixelSnippet(app, [p.pixel_id])}</code>
-                    <div className="mt-2"><CopyButton text={pixelSnippet(app, [p.pixel_id])} label="Copiar código" /></div>
-                  </details>
-                </div>
-                <form action={updatePixelTestCode} className="flex gap-1">
-                  <input type="hidden" name="id" value={p.id} />
-                  <input className="input !h-8 !w-32 text-sm" name="test_event_code" defaultValue={p.test_event_code ?? ""} placeholder="TEST1234" aria-label="Código de evento de teste" />
-                  <SubmitButton className="btn btn-sm" pendingText="…">Salvar teste</SubmitButton>
-                </form>
-                <div className="flex gap-1">
-                  {!p.is_default && (
-                    <form action={setDefaultPixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm">Tornar padrão</SubmitButton></form>
-                  )}
-                  <form action={deletePixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover o pixel ${p.name}?`}>Remover</SubmitButton></form>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <form action={addPixel} className="grid sm:grid-cols-2 gap-3">
-          <label className="field"><span className="label">Nome</span><input className="input" name="name" placeholder="Pixel principal" /></label>
-          <label className="field"><span className="label">ID do pixel</span><input className="input num" name="pixel_id" inputMode="numeric" required /></label>
-          <label className="field sm:col-span-2">
-            <span className="label">Token da API de Conversões (Gerenciador de Eventos → pixel → Configurações → Gerar token)</span>
-            <input className="input mono" name="access_token" required />
-          </label>
-          <label className="field"><span className="label">Código de teste (opcional)</span><input className="input" name="test_event_code" placeholder="TEST1234" /></label>
-          <div className="flex items-end"><SubmitButton className="btn btn-primary" pendingText="Salvando…">Adicionar pixel</SubmitButton></div>
-        </form>
-        <div className="border-t border-line pt-4 flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h3>Envio automático</h3>
-            <p className="sub">Toda venda aprovada vai para o pixel padrão pelo servidor, além do pixel da página.</p>
-          </div>
-          <form action={setAutoCapi}>
+        {pixels.map((p) => (
+          <Acc
+            key={p.id}
+            title={p.name}
+            sub={`ID ${p.pixel_id} · token …${p.access_token.slice(-6)}${p.test_event_code ? ` · teste ${p.test_event_code}` : ""}`}
+            right={p.is_default ? <span className="pill pill-approved">padrão</span> : undefined}
+            open={pixels.length === 1}
+          >
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-semibold text-profit">Código do pixel para o site</p>
+                <Help title="Onde colar o código">
+                  <ol>
+                    <li>Copie o código.</li>
+                    <li>Cole no &lt;head&gt; de <b>todas</b> as páginas: presell, vendas e obrigado.</li>
+                    <li><b>Tire o código antigo do pixel da Meta</b> dessas páginas (inclusive de plugin ou construtor de página), senão o PageView conta em dobro.</li>
+                  </ol>
+                </Help>
+              </div>
+              <code className="codebox !text-[0.75rem]">{pixelSnippet(app, [p.pixel_id])}</code>
+              <div className="mt-2"><CopyButton text={pixelSnippet(app, [p.pixel_id])} label="Copiar código" /></div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
+              <form action={updatePixelTestCode} className="flex gap-1 items-center">
+                <input type="hidden" name="id" value={p.id} />
+                <input className="input !h-8 !w-32 text-sm" name="test_event_code" defaultValue={p.test_event_code ?? ""} placeholder="TEST1234" aria-label="Código de evento de teste" />
+                <SubmitButton className="btn btn-sm" pendingText="…">Salvar teste</SubmitButton>
+                <Help title="Código de teste">
+                  <p>Para ver os eventos chegando sem afetar as campanhas:</p>
+                  <ol>
+                    <li>Gerenciador de Eventos → seu pixel → <b>Eventos de teste</b>.</li>
+                    <li>Copie o código (ex.: TEST1234), cole aqui e salve.</li>
+                    <li>Os eventos aparecem lá marcados como Navegador e Servidor.</li>
+                    <li><b>Apague o código depois</b>: enquanto ele estiver salvo, os eventos não contam para as campanhas.</li>
+                  </ol>
+                </Help>
+              </form>
+              <div className="flex gap-1 ml-auto">
+                {!p.is_default && (
+                  <form action={setDefaultPixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm">Tornar padrão</SubmitButton></form>
+                )}
+                <form action={deletePixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover o pixel ${p.name}?`}>Remover</SubmitButton></form>
+              </div>
+            </div>
+          </Acc>
+        ))}
+        <Acc
+          title="Envio automático do Purchase"
+          sub="Toda venda aprovada vai para o pixel padrão pelo servidor"
+          right={<span className={`pill ${autoCapi ? "pill-approved" : ""}`}>{autoCapi ? "Ligado" : "Desligado"}</span>}
+        >
+          <form action={setAutoCapi} className="flex items-center gap-3">
             <input type="hidden" name="auto" value={String(!autoCapi)} />
             <SubmitButton className={autoCapi ? "btn" : "btn btn-primary"} pendingText="…">{autoCapi ? "Desligar" : "Ligar"}</SubmitButton>
+            <span className="text-sm text-muted">Recomendado ligado: a Meta recebe só as compras pagas de verdade.</span>
           </form>
-        </div>
-        <p className="text-xs text-muted">A Meta aceita eventos de até 7 dias e deduplica pelo ID da venda, então disparar de novo a mesma venda não conta duas vezes.</p>
+        </Acc>
+        <Acc title="Adicionar pixel" sub="ID do pixel + token da API de Conversões" open={!pixels.length}>
+          <form action={addPixel} className="grid sm:grid-cols-2 gap-3">
+            <label className="field"><span className="label">Nome</span><input className="input" name="name" placeholder="Pixel principal" /></label>
+            <label className="field"><span className="label">ID do pixel</span><input className="input num" name="pixel_id" inputMode="numeric" required /></label>
+            <label className="field sm:col-span-2">
+              <span className="label flex items-center gap-2">
+                Token da API de Conversões
+                <Help title="Onde pegar o token">
+                  <ol>
+                    <li>Abra o <b>Gerenciador de Eventos</b> da Meta.</li>
+                    <li>Escolha o pixel → <b>Configurações</b>.</li>
+                    <li>Em <b>API de Conversões</b>, clique em <b>Gerar token de acesso</b> e copie.</li>
+                  </ol>
+                </Help>
+              </span>
+              <input className="input mono" name="access_token" required />
+            </label>
+            <label className="field"><span className="label">Código de teste (opcional)</span><input className="input" name="test_event_code" placeholder="TEST1234" /></label>
+            <div className="flex items-end"><SubmitButton className="btn btn-primary" pendingText="Salvando…">Adicionar pixel</SubmitButton></div>
+          </form>
+        </Acc>
       </section>
 
       {/* ------------------------------------------------ Webhooks */}
-      <section className="space-y-3">
-        <h2>Webhooks dos checkouts</h2>
+      <section>
+        <h2 className="mb-3">Checkouts</h2>
         {hooks.map((h) => (
-          <details key={h.name} className="panel panel-pad" open={h.health.state === "error" || (h.health.state === "waiting" && h.name === "Digistore24")}>
-            <summary className="flex items-center justify-between gap-3">
-              <span className="font-semibold">{h.name}</span>
-              <span className="flex items-center gap-2">
-                {h.status && <span className="text-xs text-muted mono">{h.status}</span>}
+          <Acc
+            key={h.name}
+            title={h.name}
+            sub={h.status}
+            open={h.health.state === "error"}
+            right={
+              <>
+                <Help title={`Como conectar ${h.name}`}>
+                  <ol>{h.steps.map((s) => <li key={s}>{s}</li>)}</ol>
+                  {h.example && (
+                    <>
+                      <p>Formato do JSON, se precisar montar:</p>
+                      <code className="codebox !text-[0.72rem]">{h.example}</code>
+                    </>
+                  )}
+                </Help>
                 <span className={`pill ${HEALTH_PILL[h.health.state].cls}`}>{HEALTH_PILL[h.health.state].label}</span>
-              </span>
-            </summary>
-            <div className="mt-4 space-y-3">
-              {h.checks.length > 0 && <Checklist checks={h.checks} />}
+              </>
+            }
+          >
+            {h.checks.length > 0 && <Checklist checks={h.checks} />}
+            <div>
+              <p className="label">URL do webhook</p>
               <div className="flex gap-2 items-start">
                 <code className="codebox flex-1">{h.url}</code>
                 <CopyButton text={h.url} />
               </div>
-              <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
-                {h.steps.map((s) => <li key={s}>{s}</li>)}
-              </ol>
-              {h.connect}
-              {h.example && <code className="codebox">{h.example}</code>}
             </div>
-          </details>
+            {h.connect}
+          </Acc>
         ))}
       </section>
 
       {/* ------------------------------------------------ Log */}
-      <section className="panel overflow-x-auto">
-        <div className="panel-pad pb-0"><h2>Últimos eventos recebidos</h2></div>
-        <table className="tbl min-w-[600px]">
-          <thead><tr><th>Quando</th><th>Origem</th><th>Evento</th><th>Resultado</th></tr></thead>
-          <tbody>
-            {(logs.data ?? []).map((l: any) => (
-              <tr key={l.id}>
-                <td className="whitespace-nowrap text-sm">{fmtDateTime(l.created_at, env.timezone)}</td>
-                <td className="text-sm">{l.source}</td>
-                <td className="text-sm mono">{l.kind}</td>
-                <td className={`text-sm ${l.ok ? "" : "neg"}`}>{l.message ?? (l.ok ? "ok" : "erro")}</td>
-              </tr>
-            ))}
-            {!logs.data?.length && <tr><td colSpan={4} className="text-center text-muted py-6">Nada recebido ainda.</td></tr>}
-          </tbody>
-        </table>
+      <section>
+        <Acc title="Últimos eventos recebidos" sub={`${logs.data?.length ?? 0} mais recentes`}>
+          <div className="overflow-x-auto -m-4">
+            <table className="tbl min-w-[600px]">
+              <thead><tr><th>Quando</th><th>Origem</th><th>Evento</th><th>Resultado</th></tr></thead>
+              <tbody>
+                {(logs.data ?? []).map((l: any) => (
+                  <tr key={l.id}>
+                    <td className="whitespace-nowrap text-sm">{fmtDateTime(l.created_at, env.timezone)}</td>
+                    <td className="text-sm">{l.source}</td>
+                    <td className="text-sm mono">{l.kind}</td>
+                    <td className={`text-sm ${l.ok ? "" : "neg"}`}>{l.message ?? (l.ok ? "ok" : "erro")}</td>
+                  </tr>
+                ))}
+                {!logs.data?.length && <tr><td colSpan={4} className="text-center text-muted py-6">Nada recebido ainda.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Acc>
       </section>
     </div>
   );
@@ -401,7 +452,7 @@ function Checklist({ checks }: { checks: Check[] }) {
         </p>
       ))}
       {firstFail ? (
-        <p className="notice notice-warn text-sm !mt-3"><b>O que falta:</b> {firstFail.fix}</p>
+        <div className="notice notice-warn text-sm !mt-3"><b>O que falta:</b> {firstFail.fix}</div>
       ) : (
         checks.every((c) => c.ok) && <p className="text-xs text-muted pt-1">Tudo certo: as vendas estão chegando no painel.</p>
       )}

@@ -22,9 +22,8 @@ const EVENT_STATUS: Record<string, SaleStatus> = {
  * O vid do script de rastreamento chega no parâmetro "custom".
  * A Digistore espera a resposta "OK" em texto puro.
  */
-export async function GET(req: Request) {
-  // Algumas configurações da Digistore testam a URL com GET: responde OK e registra
-  await logEvent("digistore", "GET", true, "a Digistore abriu a URL (GET) — os avisos de venda vêm por POST");
+/** A Digistore abre a URL (GET/HEAD) para validar antes de salvar a conexão: só responde OK. */
+export async function GET() {
   return text("OK");
 }
 
