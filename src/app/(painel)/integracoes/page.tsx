@@ -5,11 +5,13 @@ import { fmtDateTime } from "@/lib/dates";
 import { getPixels } from "@/lib/capi";
 import { getCheckoutSecrets } from "@/lib/checkouts";
 import { pixelSnippet } from "@/lib/utm";
+import { ipnInfo, type IpnInfo } from "@/lib/digistore";
+import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
 import CopyButton from "@/components/CopyButton";
 import SubmitButton from "@/components/SubmitButton";
 import {
-  addPixel, clearCheckout, connectStripe, deletePixel, disconnectStripe, newUniversalKey, saveDigistore,
+  addPixel, clearCheckout, connectDigistore, connectStripe, disconnectDigistore, deletePixel, disconnectStripe, newUniversalKey, saveDigistore,
   saveHotmart, saveStripeManual, setAutoCapi, setDefaultPixel, updatePixelTestCode,
 } from "./actions";
 
@@ -29,10 +31,83 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   const tail = (v: string) => `…${v.slice(-6)}`;
   const universalUrl = `${app}/api/webhooks/universal?key=${checkout.universalKey || "GERE_A_CHAVE"}&platform=kiwify`;
 
+  const tz = env.timezone;
+  const [hStripe, hHotmart, hDigi, hUni] = await Promise.all([
+    webhookHealth({ source: "stripe" }, !!checkout.stripeWebhookSecret),
+    webhookHealth({ source: "hotmart" }, !!checkout.hotmartHottok),
+    webhookHealth({ source: "digistore" }, !!checkout.digistorePassphrase),
+    webhookHealth({ kind: "universal" }, !!checkout.universalKey),
+  ]);
+
+  // Digistore: confere na própria Digistore (se conectada pela chave de API) + o que chegou de verdade
+  let dsInfo: IpnInfo | null = null;
+  let dsInfoErr: string | null = null;
+  if (checkout.digistoreApiKey) {
+    try {
+      dsInfo = await ipnInfo(checkout.digistoreApiKey);
+    } catch (e: any) {
+      dsInfoErr = e?.message ?? "erro";
+    }
+  }
+  const dsChecks: Check[] = [
+    {
+      ok: !!checkout.digistorePassphrase,
+      text: "Senha (SHA) salva no painel",
+      fix: "Cole a chave de API abaixo e clique em Conectar Digistore24 (ou gere a senha na configuração manual).",
+    },
+  ];
+  if (checkout.digistoreApiKey) {
+    dsChecks.push({
+      ok: dsInfoErr ? null : !!dsInfo?.exists,
+      text: dsInfoErr ? `Não deu para consultar a Digistore24: ${dsInfoErr}` : "Conexão IPN existe na sua conta Digistore24",
+      fix: "A conexão não existe mais na Digistore24. Clique em Reconectar.",
+    });
+    if (dsInfo?.exists) {
+      dsChecks.push({
+        ok: dsInfo.urlOk,
+        text: dsInfo.urlOk ? "A conexão aponta para este painel" : `A conexão aponta para outro endereço: ${dsInfo.url}`,
+        fix: "Clique em Reconectar para apontar a conexão para este painel.",
+      });
+    }
+  }
+  const dsSecretFix = checkout.digistoreApiKey
+    ? "Clique em Reconectar para o painel e a Digistore24 combinarem a senha de novo."
+    : "Copie a senha abaixo e cole no campo “Senha SHA” da conexão na Digistore24 (sem espaços), salve e clique em “Testar conexão”. Ou use a chave de API, que configura a senha sozinha.";
+  if (hDigi.state === "error") {
+    // Está chegando, mas recusado: a URL está certa, o problema é a senha
+    dsChecks.push({ ok: true, text: `A Digistore24 está mandando avisos para o painel (último: ${fmtDateTime(hDigi.lastError!.at, tz)})`, fix: "" });
+    dsChecks.push({ ok: false, text: `Aviso recusado: ${hDigi.lastError!.message}`, fix: dsSecretFix });
+  } else {
+    dsChecks.push({
+      ok: checkout.digistorePassphrase ? !!hDigi.lastOk : false,
+      text: hDigi.lastOk
+        ? `Digistore24 mandando avisos e a senha confere (último: ${fmtDateTime(hDigi.lastOk.at, tz)}${hDigi.lastOk.kind ? ` · ${hDigi.lastOk.kind}` : ""})`
+        : "Nenhum aviso da Digistore24 chegou ainda",
+      fix: checkout.digistoreApiKey
+        ? "A conexão está criada; o primeiro aviso chega na próxima venda. Para testar já: Digistore24 → Configurações → Integrações (IPN) → conexão “Painel de Vendas” → Testar conexão."
+        : "Na Digistore24 → Configurações → Integrações (IPN), crie a conexão tipo Generic com a URL acima e a senha abaixo, salve e clique em “Testar conexão”. Se continuar sem chegar, a URL ou a conexão estão erradas.",
+    });
+  }
+
+  const genericChecks = (h: Health, label: string, fixError: string, fixWaiting: string): Check[] =>
+    h.state === "off"
+      ? []
+      : [
+          {
+            ok: !!h.lastOk,
+            text: h.lastOk ? `${label} já mandou aviso (último: ${fmtDateTime(h.lastOk.at, tz)}${h.lastOk.kind ? ` · ${h.lastOk.kind}` : ""})` : `Nenhum aviso da ${label} chegou ainda`,
+            fix: fixWaiting,
+          },
+          ...(h.state === "error"
+            ? [{ ok: false, text: `Último aviso recusado (${fmtDateTime(h.lastError!.at, tz)}): ${h.lastError!.message}`, fix: fixError }]
+            : []),
+        ];
+
   const hooks: {
     name: string;
     url: string;
-    ready: boolean;
+    health: Health;
+    checks: Check[];
     status?: string;
     steps: string[];
     connect: React.ReactNode;
@@ -41,7 +116,8 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     {
       name: "Stripe",
       url: `${app}/api/webhooks/stripe`,
-      ready: !!checkout.stripeWebhookSecret,
+      health: hStripe,
+      checks: genericChecks(hStripe, "Stripe", "Clique em Reconectar: o segredo do webhook (whsec_) não confere.", "O webhook está criado; o primeiro aviso chega na próxima compra ou no Enviar evento de teste da Stripe."),
       status: checkout.stripeSecretKey ? `chave ${tail(checkout.stripeSecretKey)}` : undefined,
       steps: [
         "Cole a chave secreta (Stripe → Developers → API keys → Secret key) e clique em Conectar. O painel cria o webhook na sua conta Stripe sozinho.",
@@ -71,7 +147,8 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     {
       name: "Hotmart",
       url: `${app}/api/webhooks/hotmart`,
-      ready: !!checkout.hotmartHottok,
+      health: hHotmart,
+      checks: genericChecks(hHotmart, "Hotmart", "O Hottok salvo é diferente do da Hotmart. Copie de novo em Hotmart → Ferramentas → Webhook → Autenticação.", "Na Hotmart → Ferramentas → Webhook, confira a URL acima e use “Enviar teste”."),
       status: checkout.hotmartHottok ? `hottok ${tail(checkout.hotmartHottok)}` : undefined,
       steps: [
         "Hotmart → Ferramentas → Webhook → Cadastrar webhook, versão 2.0.0, cole a URL acima.",
@@ -94,37 +171,57 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     {
       name: "Digistore24",
       url: `${app}/api/webhooks/digistore`,
-      ready: !!checkout.digistorePassphrase,
+      health: hDigi,
+      checks: dsChecks,
+      status: checkout.digistoreApiKey ? "via chave de API" : checkout.digistorePassphrase ? "manual" : undefined,
       steps: [
-        "Clique em Gerar senha (ou digite a sua) e salve.",
-        "Digistore24 → Configurações → Integrações (IPN) → Nova conexão, tipo Generic. Cole a URL acima.",
-        "Escolha os produtos, o timing “Antes do redirecionamento para a página de obrigado” e cole a senha SHA abaixo.",
+        "Digistore24 → Configurações da conta → Acesso à conta → Chaves de API → Nova chave, com acesso total.",
+        "Cole a chave abaixo e clique em Conectar Digistore24: o painel cria a conexão IPN na sua conta (URL, eventos e senha) sozinho.",
         "O t.js coloca o ID da visita no parâmetro custom do link de pedido, que volta no IPN.",
       ],
       connect: (
         <div className="space-y-3">
-          {checkout.digistorePassphrase && (
-            <div className="flex gap-2 items-start">
-              <code className="codebox flex-1">{checkout.digistorePassphrase}</code>
-              <CopyButton text={checkout.digistorePassphrase} label="Copiar senha" />
-            </div>
+          <form action={connectDigistore} className="flex gap-2 flex-wrap">
+            <input className="input mono flex-1 min-w-0" name="api_key" type="password" placeholder="Chave de API da Digistore24" required autoComplete="off" />
+            <SubmitButton className="btn btn-primary" pendingText="Conectando…">{checkout.digistoreApiKey ? "Reconectar" : "Conectar Digistore24"}</SubmitButton>
+          </form>
+          {checkout.digistoreApiKey && (
+            <form action={disconnectDigistore}><SubmitButton className="btn btn-sm btn-danger" confirm="Desconectar a Digistore24 e apagar a conexão IPN criada pelo painel?">Desconectar</SubmitButton></form>
           )}
-          <div className="flex gap-2 flex-wrap">
-            <form action={saveDigistore} className="flex gap-2 flex-1 min-w-0">
-              <input className="input mono flex-1 min-w-0" name="passphrase" placeholder="Deixe vazio para gerar" autoComplete="off" />
-              <SubmitButton className="btn btn-primary" pendingText="Salvando…">{checkout.digistorePassphrase ? "Trocar senha" : "Gerar senha"}</SubmitButton>
-            </form>
-            {checkout.digistorePassphrase && (
-              <form action={clearCheckout}><input type="hidden" name="which" value="digistore" /><SubmitButton className="btn btn-danger" confirm="Remover a senha do IPN?">Remover</SubmitButton></form>
-            )}
-          </div>
+          <details>
+            <summary className="sub underline">Configurar manualmente (sem chave de API)</summary>
+            <div className="mt-3 space-y-3">
+              <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
+                <li>Gere a senha abaixo (ou digite a sua) e salve.</li>
+                <li>Digistore24 → Configurações → Integrações (IPN) → Nova conexão, tipo Generic. Cole a URL acima.</li>
+                <li>Produtos: todos. Timing: “Antes do redirecionamento para a página de obrigado”. Cole a senha no campo Senha SHA.</li>
+                <li>Salve e clique em <b>Testar conexão</b> — o status acima muda para “Recebendo” se tudo estiver certo.</li>
+              </ol>
+              {checkout.digistorePassphrase && (
+                <div className="flex gap-2 items-start">
+                  <code className="codebox flex-1">{checkout.digistorePassphrase}</code>
+                  <CopyButton text={checkout.digistorePassphrase} label="Copiar senha" />
+                </div>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <form action={saveDigistore} className="flex gap-2 flex-1 min-w-0">
+                  <input className="input mono flex-1 min-w-0" name="passphrase" placeholder="Deixe vazio para gerar" autoComplete="off" />
+                  <SubmitButton className="btn" pendingText="Salvando…">{checkout.digistorePassphrase ? "Trocar senha" : "Gerar senha"}</SubmitButton>
+                </form>
+                {checkout.digistorePassphrase && (
+                  <form action={clearCheckout}><input type="hidden" name="which" value="digistore" /><SubmitButton className="btn btn-danger" confirm="Remover a senha do IPN?">Remover</SubmitButton></form>
+                )}
+              </div>
+            </div>
+          </details>
         </div>
       ),
     },
     {
       name: "Universal",
       url: universalUrl,
-      ready: !!checkout.universalKey,
+      health: hUni,
+      checks: genericChecks(hUni, "plataforma", "A chave da URL não confere: copie a URL acima de novo e atualize no checkout.", "Cadastre a URL acima no checkout e faça uma venda/teste."),
       steps: [
         "Funciona com qualquer checkout que mande webhook (Kiwify, Perfect Pay, Eduzz, Yampi…), n8n, Make ou Zapier.",
         "Copie a URL acima (a chave já está nela) e troque platform=kiwify pelo nome que quer ver no painel.",
@@ -251,15 +348,16 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
       <section className="space-y-3">
         <h2>Webhooks dos checkouts</h2>
         {hooks.map((h) => (
-          <details key={h.name} className="panel panel-pad">
+          <details key={h.name} className="panel panel-pad" open={h.health.state === "error" || (h.health.state === "waiting" && h.name === "Digistore24")}>
             <summary className="flex items-center justify-between gap-3">
               <span className="font-semibold">{h.name}</span>
               <span className="flex items-center gap-2">
                 {h.status && <span className="text-xs text-muted mono">{h.status}</span>}
-                <span className={`pill ${h.ready ? "pill-approved" : "pill-pending"}`}>{h.ready ? "Conectado" : "Falta conectar"}</span>
+                <span className={`pill ${HEALTH_PILL[h.health.state].cls}`}>{HEALTH_PILL[h.health.state].label}</span>
               </span>
             </summary>
             <div className="mt-4 space-y-3">
+              {h.checks.length > 0 && <Checklist checks={h.checks} />}
               <div className="flex gap-2 items-start">
                 <code className="codebox flex-1">{h.url}</code>
                 <CopyButton text={h.url} />
@@ -292,6 +390,32 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
           </tbody>
         </table>
       </section>
+    </div>
+  );
+}
+
+interface Check {
+  ok: boolean | null; // null = não deu para conferir
+  text: string;
+  fix: string;
+}
+
+/** Lista do que foi conferido e, no primeiro item que falhou, o que falta fazer. */
+function Checklist({ checks }: { checks: Check[] }) {
+  const firstFail = checks.find((c) => c.ok === false);
+  return (
+    <div className="border border-line rounded-xl p-3 space-y-1.5">
+      {checks.map((c) => (
+        <p key={c.text} className="text-sm flex gap-2">
+          <span aria-hidden className={c.ok ? "pos" : c.ok === false ? "neg" : "text-spend"}>{c.ok ? "✓" : c.ok === false ? "✗" : "?"}</span>
+          <span className={c.ok ? "" : "font-medium"}>{c.text}</span>
+        </p>
+      ))}
+      {firstFail ? (
+        <p className="notice notice-warn text-sm !mt-3"><b>O que falta:</b> {firstFail.fix}</p>
+      ) : (
+        checks.every((c) => c.ok) && <p className="text-xs text-muted pt-1">Tudo certo: as vendas estão chegando no painel.</p>
+      )}
     </div>
   );
 }

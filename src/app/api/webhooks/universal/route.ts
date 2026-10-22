@@ -29,6 +29,7 @@ export async function POST(req: Request) {
   const key = url.searchParams.get("key") ?? req.headers.get("x-webhook-key") ?? "";
   const { universalKey } = await getCheckoutSecrets();
   if (!universalKey || !safeEqual(key, universalKey)) {
+    await logEvent(url.searchParams.get("platform") || "universal", "universal", false, "chave da URL inválida (gere/copie a URL de novo)");
     return new Response("chave inválida", { status: 401 });
   }
 

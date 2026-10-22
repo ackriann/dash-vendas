@@ -11,6 +11,8 @@ export type CheckoutSecrets = {
   stripeWebhookSecret: string;
   hotmartHottok: string;
   digistorePassphrase: string;
+  /** chave de API da Digistore24 (quando a conexão foi criada pelo painel) */
+  digistoreApiKey: string;
   universalKey: string;
 };
 
@@ -29,6 +31,7 @@ export async function getCheckoutSecrets(): Promise<CheckoutSecrets> {
     stripeWebhookSecret: s.stripeWebhookSecret || env.stripeWebhookSecret,
     hotmartHottok: s.hotmartHottok || env.hotmartHottok,
     digistorePassphrase: s.digistorePassphrase || env.digistorePassphrase,
+    digistoreApiKey: s.digistoreApiKey || "",
     universalKey: s.universalKey || env.universalKey,
   };
 }

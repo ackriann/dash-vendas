@@ -31,14 +31,20 @@ export async function POST(req: Request) {
   }
 
   const { digistorePassphrase } = await getCheckoutSecrets();
-  if (!digistorePassphrase) return text("ERROR: senha do IPN não configurada no painel", 500);
+  if (!digistorePassphrase) {
+    await logEvent("digistore", params.event ?? "?", false, "senha do IPN não está salva no painel");
+    return text("ERROR: senha do IPN não configurada no painel", 500);
+  }
   if (!validSignature(params, digistorePassphrase)) {
-    await logEvent("digistore", params.event ?? "?", false, "assinatura inválida");
+    await logEvent("digistore", params.event ?? "?", false, params.sha_sign ? "senha (SHA) diferente da salva no painel" : "aviso sem assinatura: falta a senha SHA na conexão da Digistore");
     return text("ERROR: invalid sha signature", 401);
   }
 
   const event = params.event ?? "";
-  if (event === "connection_test") return text("OK");
+  if (event === "connection_test") {
+    await logEvent("digistore", event, true, "teste de conexão recebido");
+    return text("OK");
+  }
 
   const status = EVENT_STATUS[event];
   if (!status) {
@@ -101,13 +107,23 @@ function text(body: string, status = 200) {
   return new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
+function decodeEntities(v: string): string {
+  return v
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
 function validSignature(params: Record<string, string>, passphrase: string): boolean {
-  const received = (params.sha_sign ?? "").toUpperCase();
+  const received = (params.sha_sign ?? params.SHASIGN ?? "").toUpperCase();
   if (!received) return false;
   const keys = Object.keys(params)
-    .filter((k) => k !== "sha_sign" && params[k] !== "" && params[k] !== undefined && params[k] !== null)
+    .filter((k) => k !== "sha_sign" && k !== "SHASIGN" && params[k] !== "" && params[k] !== undefined && params[k] !== null)
     .sort();
-  const str = keys.map((k) => `${k}=${params[k]}${passphrase}`).join("");
+  // Igual ao exemplo oficial (PHP): html_entity_decode no valor antes de montar a string
+  const str = keys.map((k) => `${k}=${decodeEntities(String(params[k]))}${passphrase}`).join("");
   const calc = createHash("sha512").update(str, "utf8").digest("hex").toUpperCase();
   return safeEqual(calc, received);
 }

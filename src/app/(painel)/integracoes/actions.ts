@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/session";
 import { db, setSetting } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCheckoutSecrets, saveCheckoutSecrets } from "@/lib/checkouts";
+import { deleteIpn, setupIpn } from "@/lib/digistore";
 
 function go(key: "ok" | "erro", msg: string): never {
   redirect(`/integracoes?${key}=${encodeURIComponent(msg)}`);
@@ -125,6 +126,32 @@ export async function saveHotmart(formData: FormData) {
   go("ok", "Hotmart conectada.");
 }
 
+/** Conexão em 1 clique: com a chave de API, o painel cria o IPN na Digistore24 e guarda a senha. */
+export async function connectDigistore(formData: FormData) {
+  await requireAuth();
+  const key = String(formData.get("api_key") ?? "").trim();
+  if (!key) go("erro", "Cole a chave de API da Digistore24.");
+  if (!env.appUrl.startsWith("https://") || /localhost|127\.0\.0\.1/.test(env.appUrl)) {
+    go("erro", "A conexão automática só funciona com o painel publicado (APP_URL com https).");
+  }
+  let passphrase = "";
+  try {
+    passphrase = (await setupIpn(key)).passphrase;
+  } catch (e: any) {
+    go("erro", `A Digistore24 recusou: ${e?.message ?? "erro"}`);
+  }
+  await saveCheckoutSecrets({ digistoreApiKey: key, digistorePassphrase: passphrase });
+  go("ok", "Digistore24 conectada: conexão IPN criada na sua conta e senha salva. Os avisos chegam a partir da próxima venda.");
+}
+
+export async function disconnectDigistore() {
+  await requireAuth();
+  const { digistoreApiKey } = await getCheckoutSecrets();
+  if (digistoreApiKey) await deleteIpn(digistoreApiKey).catch(() => undefined);
+  await saveCheckoutSecrets({ digistoreApiKey: "", digistorePassphrase: "" });
+  go("ok", "Digistore24 desconectada (conexão IPN apagada na Digistore).");
+}
+
 export async function saveDigistore(formData: FormData) {
   await requireAuth();
   // Campo vazio = gera uma senha aleatória para colar na Digistore
@@ -143,6 +170,6 @@ export async function clearCheckout(formData: FormData) {
   await requireAuth();
   const which = String(formData.get("which"));
   if (which === "hotmart") await saveCheckoutSecrets({ hotmartHottok: "" });
-  else if (which === "digistore") await saveCheckoutSecrets({ digistorePassphrase: "" });
+  else if (which === "digistore") await saveCheckoutSecrets({ digistorePassphrase: "", digistoreApiKey: "" });
   go("ok", "Configuração removida do painel.");
 }
