@@ -3,6 +3,7 @@ import { getCheckoutSecrets } from "@/lib/checkouts";
 import { db, logEvent } from "@/lib/db";
 import { safeEqual } from "@/lib/auth";
 import { ingestSale, type SaleStatus } from "@/lib/sales";
+import { digistoreKey } from "@/lib/digistore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,8 @@ const EVENT_STATUS: Record<string, SaleStatus> = {
 
 /**
  * IPN da Digistore24 (tipo "Generic").
- * Assinatura: SHA-512 de "chave=valor" + senha, em ordem alfabética, sem campos vazios.
+ * Autenticação: chave na URL (?key=, sem precisar de senha na Digistore) ou
+ * assinatura SHA-512 de "chave=valor" + senha, em ordem alfabética, sem campos vazios.
  * O vid do script de rastreamento chega no parâmetro "custom".
  * A Digistore espera a resposta "OK" em texto puro.
  */
@@ -30,14 +32,19 @@ export async function POST(req: Request) {
     form?.forEach((v, k) => (params[k] = String(v)));
   }
 
+  // Vale a chave na URL (sem senha na Digistore) OU a assinatura SHA com a senha salva no painel
+  const key = new URL(req.url).searchParams.get("key") ?? "";
   const { digistorePassphrase } = await getCheckoutSecrets();
-  if (!digistorePassphrase) {
-    await logEvent("digistore", params.event ?? "?", false, "senha do IPN não está salva no painel");
-    return text("ERROR: senha do IPN não configurada no painel", 500);
-  }
-  if (!validSignature(params, digistorePassphrase)) {
-    await logEvent("digistore", params.event ?? "?", false, params.sha_sign ? "senha (SHA) diferente da salva no painel" : "aviso sem assinatura: falta a senha SHA na conexão da Digistore");
-    return text("ERROR: invalid sha signature", 401);
+  const keyOk = !!key && safeEqual(key, digistoreKey());
+  const shaOk = !!digistorePassphrase && !!params.sha_sign && validSignature(params, digistorePassphrase);
+  if (!keyOk && !shaOk) {
+    const why = key
+      ? "a chave da URL não confere: copie a URL do painel de novo"
+      : params.sha_sign
+        ? "a senha SHA da conexão é diferente da salva no painel (ou use a URL do painel, que já tem a chave)"
+        : "a URL cadastrada na Digistore está sem a chave: troque pela URL do painel";
+    await logEvent("digistore", params.event ?? "?", false, `Aviso recusado: ${why}`);
+    return text("ERROR: unauthorized", 401);
   }
 
   const event = params.event ?? "";

@@ -5,7 +5,7 @@ import { fmtDateTime } from "@/lib/dates";
 import { getPixels } from "@/lib/capi";
 import { getCheckoutSecrets } from "@/lib/checkouts";
 import { pixelSnippet } from "@/lib/utm";
-import { ipnInfo, type IpnInfo } from "@/lib/digistore";
+import { ipnInfo, ipnUrl as digistoreIpnUrl, type IpnInfo } from "@/lib/digistore";
 import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
 import CopyButton from "@/components/CopyButton";
@@ -35,7 +35,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   const [hStripe, hHotmart, hDigi, hUni] = await Promise.all([
     webhookHealth({ source: "stripe" }, !!checkout.stripeWebhookSecret),
     webhookHealth({ source: "hotmart" }, !!checkout.hotmartHottok),
-    webhookHealth({ source: "digistore" }, !!checkout.digistorePassphrase),
+    webhookHealth({ source: "digistore" }, true),
     webhookHealth({ kind: "universal" }, !!checkout.universalKey),
   ]);
 
@@ -49,13 +49,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
       dsInfoErr = e?.message ?? "erro";
     }
   }
-  const dsChecks: Check[] = [
-    {
-      ok: !!checkout.digistorePassphrase,
-      text: "Senha (SHA) salva no painel",
-      fix: "Cole a chave de API abaixo e clique em Conectar Digistore24 (ou gere a senha na configuração manual).",
-    },
-  ];
+  const dsChecks: Check[] = [];
   if (checkout.digistoreApiKey) {
     dsChecks.push({
       ok: dsInfoErr ? null : !!dsInfo?.exists,
@@ -71,21 +65,21 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     }
   }
   const dsSecretFix = checkout.digistoreApiKey
-    ? "Clique em Reconectar para o painel e a Digistore24 combinarem a senha de novo."
-    : "Copie a senha abaixo e cole no campo “Senha SHA” da conexão na Digistore24 (sem espaços), salve e clique em “Testar conexão”. Ou use a chave de API, que configura a senha sozinha.";
+    ? "Clique em Reconectar para o painel recriar a conexão com a URL certa."
+    : "Na Digistore24 → Configurações → Integrações (IPN) → sua conexão, troque a URL pela URL acima (ela já tem a chave de segurança, não precisa de senha), salve e clique em “Testar conexão”.";
   if (hDigi.state === "error") {
     // Está chegando, mas recusado: a URL está certa, o problema é a senha
     dsChecks.push({ ok: true, text: `A Digistore24 está mandando avisos para o painel (último: ${fmtDateTime(hDigi.lastError!.at, tz)})`, fix: "" });
     dsChecks.push({ ok: false, text: `Aviso recusado: ${hDigi.lastError!.message}`, fix: dsSecretFix });
   } else {
     dsChecks.push({
-      ok: checkout.digistorePassphrase ? !!hDigi.lastOk : false,
+      ok: !!hDigi.lastOk,
       text: hDigi.lastOk
-        ? `Digistore24 mandando avisos e a senha confere (último: ${fmtDateTime(hDigi.lastOk.at, tz)}${hDigi.lastOk.kind ? ` · ${hDigi.lastOk.kind}` : ""})`
+        ? `Digistore24 mandando avisos e aceitos pelo painel (último: ${fmtDateTime(hDigi.lastOk.at, tz)}${hDigi.lastOk.kind ? ` · ${hDigi.lastOk.kind}` : ""})`
         : "Nenhum aviso da Digistore24 chegou ainda",
       fix: checkout.digistoreApiKey
         ? "A conexão está criada; o primeiro aviso chega na próxima venda. Para testar já: Digistore24 → Configurações → Integrações (IPN) → conexão “Painel de Vendas” → Testar conexão."
-        : "Na Digistore24 → Configurações → Integrações (IPN), crie a conexão tipo Generic com a URL acima e a senha abaixo, salve e clique em “Testar conexão”. Se continuar sem chegar, a URL ou a conexão estão erradas.",
+        : "Na Digistore24 → Configurações → Integrações (IPN), crie a conexão tipo Generic com a URL acima, salve e clique em “Testar conexão”. Se continuar sem chegar, a URL ou a conexão estão erradas.",
     });
   }
 
@@ -170,13 +164,13 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     },
     {
       name: "Digistore24",
-      url: `${app}/api/webhooks/digistore`,
+      url: digistoreIpnUrl(),
       health: hDigi,
       checks: dsChecks,
-      status: checkout.digistoreApiKey ? "via chave de API" : checkout.digistorePassphrase ? "manual" : undefined,
+      status: checkout.digistoreApiKey ? "via chave de API" : undefined,
       steps: [
-        "Digistore24 → Configurações da conta → Acesso à conta → Chaves de API → Nova chave, com acesso total.",
-        "Cole a chave abaixo e clique em Conectar Digistore24: o painel cria a conexão IPN na sua conta (URL, eventos e senha) sozinho.",
+        "Mais simples: Digistore24 → Configurações → Integrações (IPN) → Nova conexão, tipo Generic. Cole a URL acima — ela já tem a chave de segurança, então NÃO precisa de senha. Produtos: todos. Salve e clique em “Testar conexão”.",
+        "Ou automático: crie uma chave de API (Configurações da conta → Acesso à conta → Chaves de API, acesso total), cole abaixo e clique em Conectar Digistore24 — o painel cria a conexão sozinho.",
         "O t.js coloca o ID da visita no parâmetro custom do link de pedido, que volta no IPN.",
       ],
       connect: (
@@ -189,14 +183,9 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
             <form action={disconnectDigistore}><SubmitButton className="btn btn-sm btn-danger" confirm="Desconectar a Digistore24 e apagar a conexão IPN criada pelo painel?">Desconectar</SubmitButton></form>
           )}
           <details>
-            <summary className="sub underline">Configurar manualmente (sem chave de API)</summary>
+            <summary className="sub underline">Senha SHA (opcional)</summary>
             <div className="mt-3 space-y-3">
-              <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
-                <li>Gere a senha abaixo (ou digite a sua) e salve.</li>
-                <li>Digistore24 → Configurações → Integrações (IPN) → Nova conexão, tipo Generic. Cole a URL acima.</li>
-                <li>Produtos: todos. Timing: “Antes do redirecionamento para a página de obrigado”. Cole a senha no campo Senha SHA.</li>
-                <li>Salve e clique em <b>Testar conexão</b> — o status acima muda para “Recebendo” se tudo estiver certo.</li>
-              </ol>
+              <p className="text-sm text-muted">Só se quiser usar a senha da Digistore além da chave da URL. Se usar, a senha da conexão na Digistore precisa ser igual a esta.</p>
               {checkout.digistorePassphrase && (
                 <div className="flex gap-2 items-start">
                   <code className="codebox flex-1">{checkout.digistorePassphrase}</code>

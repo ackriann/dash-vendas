@@ -1,4 +1,5 @@
 import "server-only";
+import { createHmac } from "crypto";
 import { env } from "./env";
 
 // =====================================================================
@@ -9,7 +10,13 @@ import { env } from "./env";
 
 const BASE = "https://www.digistore24.com/api/call";
 
-export const ipnUrl = () => `${env.appUrl}/api/webhooks/digistore`;
+/**
+ * Chave de segurança que vai na URL do IPN. Com ela a Digistore não precisa de senha
+ * (o campo de senha SHA da conexão pode ficar vazio). Derivada do SESSION_SECRET.
+ */
+export const digistoreKey = () => createHmac("sha256", env.sessionSecret).update("digistore-ipn").digest("hex").slice(0, 32);
+
+export const ipnUrl = () => `${env.appUrl}/api/webhooks/digistore?key=${digistoreKey()}`;
 
 /** Identifica a conexão criada por este painel na conta da Digistore. */
 export const domainId = () => `painel-${new URL(env.appUrl).hostname}`.replace(/[^a-z0-9.-]/gi, "-").slice(0, 60);
@@ -67,7 +74,7 @@ export async function ipnInfo(apiKey: string): Promise<IpnInfo> {
     return {
       exists: !!url,
       url,
-      urlOk: !!url && url.replace(/\/$/, "") === ipnUrl(),
+      urlOk: !!url && url.includes("/api/webhooks/digistore") && url.includes(digistoreKey()),
       transactions: d.transactions ?? null,
       products: d.product_ids ?? null,
     };
