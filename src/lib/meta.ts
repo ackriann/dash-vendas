@@ -126,10 +126,16 @@ export interface TokenInfo {
   error?: { message: string };
 }
 
-/** Lê os dados do token usando o próprio app (debug_token). */
-export async function debugToken(token: string, appId: string, appSecret: string): Promise<TokenInfo> {
-  const r = await rawGet("debug_token", { input_token: token, access_token: appToken(appId, appSecret) });
+/** Lê os dados do token (debug_token). Sem a chave do app, o próprio token faz a consulta. */
+export async function debugToken(token: string, appId?: string | null, appSecret?: string | null): Promise<TokenInfo> {
+  const access = appId && appSecret ? appToken(appId, appSecret) : token;
+  const r = await rawGet("debug_token", { input_token: token, access_token: access });
   return r.data as TokenInfo;
+}
+
+/** App que gerou o token (funciona só com o token, sem a chave secreta). */
+export async function tokenApp(token: string): Promise<{ id: string; name: string } | null> {
+  return rawGet("app", { fields: "id,name", access_token: token }).catch(() => null);
 }
 
 /** Troca um token de usuário pelo de longa duração (≈60 dias) usando o app do perfil. */

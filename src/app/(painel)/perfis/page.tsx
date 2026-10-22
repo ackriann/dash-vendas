@@ -48,7 +48,7 @@ export default async function Perfis({ searchParams }: { searchParams: Promise<{
                   <span className={`pill ${p.status === "ok" ? "pill-approved" : "pill-refunded"}`}>{p.status === "ok" ? "Conectado" : "Com erro"}</span>
                 </div>
                 <p className="sub">
-                  App <b className="text-ink">{p.app_name ?? "—"}</b> ({p.app_id}) · {TYPE_LABEL[p.token_type ?? ""] ?? p.token_type ?? "token"} · token …{p.token.slice(-6)}
+                  App <b className="text-ink">{p.app_name ?? "—"}</b> ({p.app_id}){!p.app_secret && " · sem chave"} · {TYPE_LABEL[p.token_type ?? ""] ?? p.token_type ?? "token"} · token …{p.token.slice(-6)}
                 </p>
                 <p className={`text-xs ${left !== null && left < 7 ? "text-spend" : "text-muted"}`}>
                   {left === null ? "Token sem vencimento" : left < 0 ? "Token vencido" : `Token vence em ${left} dia(s) · ${fmtDateTime(p.expires_at, env.timezone)}`}
@@ -59,7 +59,7 @@ export default async function Perfis({ searchParams }: { searchParams: Promise<{
               </div>
               <div className="flex gap-2 flex-wrap">
                 <a className="btn btn-sm" href={`/api/auth/facebook?perfil=${p.id}`}>Reconectar com Facebook</a>
-                <form action={checkProfile}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm" pendingText="Verificando…">{p.token_type === "USER" ? "Verificar e renovar" : "Verificar"}</SubmitButton></form>
+                <form action={checkProfile}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm" pendingText="Verificando…">{p.token_type === "USER" && p.app_secret ? "Verificar e renovar" : "Verificar"}</SubmitButton></form>
                 <form action={syncProfile}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm" pendingText="Buscando…">Buscar contas</SubmitButton></form>
                 <form action={removeProfile}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover o perfil ${p.name}? As contas dele saem do painel.`}>Remover</SubmitButton></form>
               </div>
@@ -111,58 +111,67 @@ export default async function Perfis({ searchParams }: { searchParams: Promise<{
       <section className="panel panel-pad space-y-4">
         <div>
           <h2>{profiles.length ? "Adicionar outro perfil" : "Conectar perfil"}</h2>
-          <p className="sub">Entre com o Facebook ou cole o token + app. Nos dois casos o token de usuário comum é trocado pelo de 60 dias e renovado sozinho.</p>
+          <p className="sub">Cole o token de acesso — o painel descobre o app e as contas de anúncio sozinho.</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {loginReady ? (
-            <a className="btn btn-primary" href="/api/auth/facebook">Entrar com Facebook</a>
-          ) : (
-            <p className="notice notice-warn text-sm">Para o botão “Entrar com Facebook”, preencha META_APP_ID e META_APP_SECRET no servidor. Enquanto isso, use o token + app abaixo.</p>
-          )}
-          {loginReady && <span className="text-xs text-muted">usa o app {env.metaAppId}</span>}
-        </div>
-        <p className="label !mb-0 border-t border-line pt-4">Ou conecte por token + app</p>
-        <form action={addProfile} className="grid sm:grid-cols-2 gap-3">
-          <label className="field"><span className="label">App ID</span><input className="input num" name="app_id" inputMode="numeric" required autoComplete="off" placeholder="123456789012345" /></label>
-          <label className="field"><span className="label">Chave secreta do app</span><input className="input mono" name="app_secret" type="password" required autoComplete="off" /></label>
-          <label className="field sm:col-span-2"><span className="label">Token de acesso</span><textarea className="textarea mono" name="token" placeholder="EAA…" required /></label>
+        {loginReady && (
+          <>
+            <div className="flex items-center gap-3 flex-wrap">
+              <a className="btn btn-primary" href="/api/auth/facebook">Entrar com Facebook</a>
+              <span className="text-xs text-muted">usa o app {env.metaAppId}</span>
+            </div>
+            <p className="label !mb-0 border-t border-line pt-4">Ou cole o token</p>
+          </>
+        )}
+        <form action={addProfile} className="space-y-3">
+          <label className="field"><span className="label">Token de acesso</span><textarea className="textarea mono" name="token" placeholder="EAA…" required /></label>
           <label className="field"><span className="label">Nome do perfil (opcional)</span><input className="input" name="name" placeholder="Usa o nome do Facebook" /></label>
-          <div className="flex items-end"><SubmitButton className="btn btn-primary" pendingText="Validando…">Conectar perfil</SubmitButton></div>
+          <details className="border border-line rounded-xl p-3">
+            <summary className="text-sm">
+              <b>App ID e chave secreta</b> <span className="text-muted">(opcional — com eles o token de usuário vira de 60 dias e o painel renova sozinho)</span>
+            </summary>
+            <div className="grid sm:grid-cols-2 gap-3 mt-3">
+              <label className="field"><span className="label">App ID</span><input className="input num" name="app_id" inputMode="numeric" autoComplete="off" placeholder="123456789012345" /></label>
+              <label className="field"><span className="label">Chave secreta do app</span><input className="input mono" name="app_secret" type="password" autoComplete="off" /></label>
+            </div>
+          </details>
+          <SubmitButton className="btn btn-primary" pendingText="Validando…">Conectar perfil</SubmitButton>
         </form>
       </section>
 
       <section className="panel panel-pad space-y-4">
-        <h2>Como pegar o App ID, a chave e o token</h2>
+        <h2>Como gerar o token</h2>
+        <p className="text-sm text-muted">
+          Não precisa de app aprovado pela Meta. A revisão só é exigida para usar o app com pessoas de fora dele; para o seu perfil e as suas contas, um
+          app em <b>modo de desenvolvimento</b> já tem todas as permissões.
+        </p>
         <div className="space-y-2">
-          <h3>1. App</h3>
+          <h3>Opção 1 — Token que não vence (recomendado)</h3>
           <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
-            <li>Em <a className="underline" href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com/apps</a> → <b>Criar app</b> → tipo <b>Empresa</b> (ou use um app que você já tem).</li>
-            <li>Adicione o caso de uso de <b>Marketing API</b> (anúncios) e, se for gerenciar páginas, o de <b>Páginas</b>.</li>
-            <li>Em <b>Configurações do app → Básico</b>, copie o <b>ID do app</b> e clique em Mostrar na <b>Chave secreta do app</b>.</li>
-            <li>Em modo de desenvolvimento o app já funciona para você (administrador). Para usar o perfil de outra pessoa, adicione-a em <b>Funções do app</b>.</li>
-            <li>Para o login com Facebook: adicione o produto <b>Login do Facebook</b> e, em <b>URIs de redirecionamento OAuth válidos</b>, cadastre o endereço abaixo (em todo app que for usar no botão Reconectar).</li>
+            <li>Se ainda não tem um app: <a className="underline" href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com/apps</a> → <b>Criar app</b> → tipo <b>Empresa</b>, ligado ao seu Gerenciador de Negócios. Pode deixar em desenvolvimento.</li>
+            <li>Gerenciador de Negócios → <b>Configurações do negócio → Usuários → Usuários do sistema</b> → Adicionar (função Administrador).</li>
+            <li><b>Atribuir ativos</b>: as contas de anúncio (controle total) e as páginas.</li>
+            <li><b>Gerar novo token</b> → escolha o app → validade <b>Nunca</b> → marque as permissões abaixo → copie e cole aqui. Só o token já basta.</li>
           </ol>
-          <div className="flex gap-2 items-start">
+        </div>
+        <div className="space-y-2">
+          <h3>Opção 2 — Token do seu perfil</h3>
+          <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
+            <li>Abra o <a className="underline" href={explorer} target="_blank" rel="noreferrer">Explorador da Graph API</a>, escolha o <b>seu app</b> e “Token do usuário”.</li>
+            <li>Adicione as permissões abaixo, clique em <b>Generate Access Token</b> e autorize as contas e páginas.</li>
+            <li>Esse token vence em poucas horas. Para virar de 60 dias e o painel renovar sozinho, preencha também o <b>App ID</b> e a <b>chave secreta</b> do mesmo app (Configurações do app → Básico).</li>
+          </ol>
+        </div>
+        <details>
+          <summary className="sub underline">Login com Facebook (opcional)</summary>
+          <p className="text-sm text-muted mt-2">
+            Para o botão “Entrar com Facebook”: no app, adicione o produto <b>Login do Facebook</b> e cadastre em <b>URIs de redirecionamento OAuth válidos</b> o endereço
+            abaixo. No servidor, preencha META_APP_ID e META_APP_SECRET com esse app.
+          </p>
+          <div className="flex gap-2 items-start mt-2">
             <code className="codebox flex-1">{redirectUri}</code>
             <CopyButton text={redirectUri} />
           </div>
-        </div>
-        <div className="space-y-2">
-          <h3>2a. Token de usuário (vence em 60 dias, o painel renova)</h3>
-          <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
-            <li>Abra o <a className="underline" href={explorer} target="_blank" rel="noreferrer">Explorador da Graph API</a>, escolha o <b>seu app</b> em “Aplicativo da Meta” e “Token do usuário”.</li>
-            <li>Em Permissões, adicione as permissões abaixo e clique em <b>Generate Access Token</b>, autorizando as contas e páginas.</li>
-            <li>Copie o token e cole aqui junto com o App ID e a chave do <b>mesmo app</b>.</li>
-          </ol>
-        </div>
-        <div className="space-y-2">
-          <h3>2b. Token de usuário do sistema (não vence — recomendado)</h3>
-          <ol className="list-decimal pl-5 space-y-1 text-sm text-muted">
-            <li>Gerenciador de Negócios → <b>Configurações do negócio → Usuários do sistema</b> → Adicionar (função Administrador).</li>
-            <li><b>Atribuir ativos</b>: contas de anúncio (controle total) e páginas.</li>
-            <li>Em <b>Contas → Apps</b>, o app precisa estar no mesmo negócio. Depois clique em <b>Gerar novo token</b>, escolha o app, validade <b>Nunca</b> e marque as permissões.</li>
-          </ol>
-        </div>
+        </details>
         <div className="space-y-2">
           <p className="text-sm">Permissões:</p>
           <code className="codebox">{scopes}</code>

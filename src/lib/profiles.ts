@@ -1,7 +1,8 @@
 import "server-only";
 import { db } from "./db";
 import {
-  META_SCOPES, MetaError, checkApp, debugToken, exchangeForLongToken, listAdAccounts, listPages, pageToken, whoAmI,
+  type TokenInfo,
+  META_SCOPES, MetaError, checkApp, debugToken, tokenApp, exchangeForLongToken, listAdAccounts, listPages, pageToken, whoAmI,
   type FbPage, type MetaAuth,
 } from "./meta";
 
@@ -132,8 +133,9 @@ export async function listAllPages(): Promise<{ pages: PageWithProfile[]; errors
 
 export interface ConnectInput {
   name?: string;
-  appId: string;
-  appSecret: string;
+  /** opcionais: sem eles o painel usa o token do jeito que veio (sem trocar pelo de 60 dias) */
+  appId?: string;
+  appSecret?: string;
   token: string;
 }
 
@@ -142,45 +144,59 @@ interface Validated {
   type: string;
   expiresAt: string | null;
   scopes: string[];
-  appName: string;
+  appId: string;
+  appName: string | null;
+  appSecret: string;
   me: { id: string; name: string };
   missing: string[];
 }
 
 /**
- * Valida o app e o token juntos: o token precisa ser do mesmo app (senão o
- * appsecret_proof falha). Token de usuário comum é trocado pelo de 60 dias.
+ * Valida o token. O app (App ID + chave secreta) é opcional:
+ * - com a chave: o token precisa ser do mesmo app, as chamadas vão com appsecret_proof
+ *   e token de usuário comum é trocado pelo de 60 dias (e renovado depois);
+ * - só o token: o painel descobre o app pelo próprio token e usa o token como veio.
  */
 export async function validateToken(input: ConnectInput): Promise<Validated> {
-  const appId = input.appId.replace(/\D/g, "");
-  const appSecret = input.appSecret.trim();
+  let appId = (input.appId ?? "").replace(/\D/g, "");
+  const appSecret = (input.appSecret ?? "").trim();
   let token = input.token.trim().replace(/^Bearer\s+/i, "");
-  if (!appId || !appSecret || !token) throw new MetaError("Preencha App ID, chave secreta e token.");
+  if (!token) throw new MetaError("Cole o token de acesso.");
+  if (appSecret && !appId) throw new MetaError("Informe o App ID junto com a chave secreta.");
 
-  let app: { name: string };
-  try {
-    app = await checkApp(appId, appSecret);
-  } catch {
-    throw new MetaError("App ID ou chave secreta inválidos. Confira em developers.facebook.com → seu app → Configurações → Básico.");
+  let appName: string | null = null;
+  if (appSecret) {
+    try {
+      appName = (await checkApp(appId, appSecret)).name;
+    } catch {
+      throw new MetaError("App ID ou chave secreta inválidos. Confira em developers.facebook.com → seu app → Configurações → Básico.");
+    }
   }
 
-  let info = await debugToken(token, appId, appSecret);
+  let info: TokenInfo;
+  try {
+    info = await debugToken(token, appSecret ? appId : null, appSecret || null);
+  } catch (e: any) {
+    throw new MetaError(`Token recusado pela Meta: ${e?.message ?? "inválido"}`);
+  }
   if (!info.is_valid) throw new MetaError(`Token inválido ou expirado${info.error?.message ? `: ${info.error.message}` : "."}`);
-  if (String(info.app_id) !== appId) {
-    throw new MetaError(`Esse token foi gerado por outro app (ID ${info.app_id}). Gere o token no app ${app.name} ou use o App ID ${info.app_id}.`);
+  if (appSecret && String(info.app_id) !== appId) {
+    throw new MetaError(`Esse token foi gerado por outro app (ID ${info.app_id}). Gere o token no app ${appName} ou deixe App ID e chave em branco.`);
   }
   if (info.type === "PAGE" || info.type === "APP") {
     throw new MetaError("Use um token de usuário ou de usuário do sistema, não de página/app.");
   }
+  appId = String(info.app_id ?? appId);
+  if (!appName) appName = (await tokenApp(token))?.name ?? null;
 
-  // Token de usuário que vence em menos de 7 dias = curto: troca pelo de longa duração
-  if (info.type === "USER" && info.expires_at && info.expires_at * 1000 - Date.now() < 7 * 86400000) {
+  // Token de usuário que vence em menos de 7 dias = curto: com a chave, troca pelo de longa duração
+  if (appSecret && info.type === "USER" && info.expires_at && info.expires_at * 1000 - Date.now() < 7 * 86400000) {
     const long = await exchangeForLongToken(token, appId, appSecret);
     token = long.token;
     info = await debugToken(token, appId, appSecret);
   }
 
-  const me = await whoAmI({ token, appSecret });
+  const me = await whoAmI({ token, appSecret: appSecret || null });
   const scopes = info.scopes ?? [];
   if (!scopes.includes("ads_read") && !scopes.includes("ads_management")) {
     throw new MetaError("O token não tem a permissão ads_read (ou ads_management). Gere de novo marcando as permissões de anúncios.");
@@ -190,7 +206,9 @@ export async function validateToken(input: ConnectInput): Promise<Validated> {
     type: info.type,
     expiresAt: info.expires_at ? new Date(info.expires_at * 1000).toISOString() : null,
     scopes,
-    appName: app.name,
+    appId,
+    appName,
+    appSecret,
     me,
     missing: META_SCOPES.filter((s) => !scopes.includes(s)),
   };
@@ -201,9 +219,9 @@ export async function connectProfile(input: ConnectInput, existingId?: string): 
   const row = {
     name: input.name?.trim() || v.me.name,
     fb_user_id: v.me.id,
-    app_id: input.appId.replace(/\D/g, ""),
+    app_id: v.appId,
     app_name: v.appName,
-    app_secret: input.appSecret.trim(),
+    app_secret: v.appSecret,
     token: v.token,
     token_type: v.type,
     expires_at: v.expiresAt,
@@ -256,9 +274,10 @@ export async function syncAccounts(profile: MetaProfile): Promise<number> {
 export async function refreshProfile(profile: MetaProfile): Promise<MetaProfile> {
   const patch: Partial<MetaProfile> = { checked_at: new Date().toISOString() };
   try {
-    let info = await debugToken(profile.token, profile.app_id, profile.app_secret);
+    let info = await debugToken(profile.token, profile.app_id, profile.app_secret || null);
     if (!info.is_valid) throw new MetaError(info.error?.message ?? "Token expirado ou revogado.");
-    if (info.type === "USER" && info.expires_at) {
+    // Renovar exige a chave do app; sem ela o token fica como está
+    if (profile.app_secret && info.type === "USER" && info.expires_at) {
       const long = await exchangeForLongToken(profile.token, profile.app_id, profile.app_secret).catch(() => null);
       if (long?.token) {
         patch.token = long.token;
