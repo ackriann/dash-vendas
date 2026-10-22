@@ -71,6 +71,26 @@ export async function POST(req: Request) {
     return text("OK");
   }
 
+  // Pedido de teste (api_mode=test): confere o rastreio, mas não entra no faturamento
+  if (params.api_mode === "test") {
+    let tracking = "sem o ID da visita (o link do checkout não passou pelo código do pixel)";
+    if (params.custom) {
+      const { data: click } = await db().from("clicks").select("utm_campaign,campaign_id").eq("id", params.custom).maybeSingle();
+      tracking = click
+        ? click.campaign_id
+          ? `rastreado: campanha ${click.utm_campaign ?? click.campaign_id}`
+          : "com o ID da visita, mas a visita veio sem UTMs de anúncio"
+        : "com custom, mas a visita não foi registrada pelo código do pixel";
+    }
+    await logEvent(
+      "digistore",
+      event,
+      true,
+      `Venda de TESTE recebida (não entra no faturamento): ${params.product_name ?? "produto"} · ${params.currency ?? ""} ${params.transaction_amount ?? params.amount_brutto ?? ""} · ${tracking}`,
+    );
+    return text("OK");
+  }
+
   try {
     const orderId = params.order_id ?? params.transaction_id ?? "";
     const seq = params.pay_sequence_no ?? "0";
@@ -105,7 +125,7 @@ export async function POST(req: Request) {
       payment_method: params.pay_method ?? null,
       currency: params.currency ?? "EUR",
       gross_amount: Math.abs(amount),
-      net_reported: params.vendor_netto_amount ? Number(params.vendor_netto_amount) : null,
+      net_reported: params.amount_vendor ? Number(params.amount_vendor) : null,
       click_id: params.custom || null,
       utm_source: params.utm_source ?? null,
       utm_medium: params.utm_medium ?? null,
