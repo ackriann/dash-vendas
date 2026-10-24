@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
-// Rotas abertas: login, webhooks das plataformas, rastreamento e arquivos do PWA.
+// Rotas abertas: login, cadastro (pede código de convite), webhooks das plataformas, rastreamento e arquivos do PWA.
 const PUBLIC = [
   /^\/login/,
+  /^\/cadastro/,
   /^\/api\/webhooks\//,
   /^\/api\/track/,
   /^\/api\/cron\//,

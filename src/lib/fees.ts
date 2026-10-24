@@ -9,6 +9,8 @@ export interface Fee {
   value: number;
   platform: string | null;
   product: string | null;
+  /** null = vale em todos os dashes */
+  dashboard_id?: string | null;
   active: boolean;
 }
 

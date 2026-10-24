@@ -5,6 +5,7 @@ import { adsFees, dailyFixed, saleFees, type Fee } from "./fees";
 import { round2, toBase, type FxRates } from "./money";
 import { getDailySpend, getHourlySpend, type MetaAuth } from "./meta";
 import { authOf } from "./profiles";
+import { getActiveDashboard, type Dashboard } from "./dashboards";
 import { addDays, hourInTz, ymdInTz, type DateRange } from "./dates";
 
 export interface SelectedAccount {
@@ -32,16 +33,24 @@ export interface SaleLite {
   ad_id: string | null;
 }
 
-export async function getContext() {
-  const [base, rates, accounts, fees, profiles] = await Promise.all([
+/**
+ * Moeda, câmbio, contas de anúncio e taxas da conta.
+ * Com { useDash: true } aplica o dash escolhido: só as contas de anúncio do dash
+ * e as taxas que valem para ele (as de outros dashes ficam de fora).
+ */
+export async function getContext(opts: { useDash?: boolean } = {}) {
+  const [base, rates, allAccounts, allFees, profiles, dash] = await Promise.all([
     getSetting<string>("base_currency", "BRL"),
     getSetting<FxRates>("fx_rates", { BRL: 1 }),
     loadSelectedAccounts(),
     loadFees(),
     db().from("meta_profiles").select("id,name,status,expires_at,last_error").order("created_at"),
+    opts.useDash ? getActiveDashboard() : Promise.resolve(null),
   ]);
+  const accounts = dash?.ad_account_ids.length ? allAccounts.filter((a) => dash.ad_account_ids.includes(a.id)) : allAccounts;
+  const fees = dash ? allFees.filter((f) => !f.dashboard_id || f.dashboard_id === dash.id) : allFees;
   return {
-    base, rates, accounts, fees, tz: env.timezone,
+    base, rates, accounts, fees, tz: env.timezone, dash,
     profiles: (profiles.data ?? []) as { id: string; name: string; status: string; expires_at: string | null; last_error: string | null }[],
   };
 }
@@ -73,16 +82,18 @@ export async function loadFees(): Promise<Fee[]> {
   return (data ?? []).map((f: any) => ({ ...f, value: Number(f.value) })) as Fee[];
 }
 
-/** Vendas do período (pela data da venda). */
-export async function loadSales(range: DateRange): Promise<SaleLite[]> {
+/** Vendas do período (pela data da venda). Com um dash, só os produtos dele. */
+export async function loadSales(range: DateRange, dash?: Dashboard | null): Promise<SaleLite[]> {
   const out: SaleLite[] = [];
   const pageSize = 1000;
   for (let from = 0; from < 50000; from += pageSize) {
-    const { data, error } = await db()
+    let q = db()
       .from("sales")
       .select("id,platform,status,created_at,approved_at,product_name,payment_method,customer_email,utm_source,gross_base,campaign_id,adset_id,ad_id")
       .gte("created_at", range.startIso)
-      .lt("created_at", range.endIso)
+      .lt("created_at", range.endIso);
+    if (dash?.products.length) q = q.in("product_name", dash.products);
+    const { data, error } = await q
       .order("created_at", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);

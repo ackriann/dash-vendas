@@ -1,4 +1,4 @@
-// Sessão simples de usuário único: cookie assinado com HMAC-SHA256.
+// Sessão por conta: cookie assinado com HMAC-SHA256 que guarda o id da conta.
 // Funciona tanto no proxy quanto em rotas/ações do servidor (Web Crypto).
 
 export const SESSION_COOKIE = "painel_session";
@@ -29,19 +29,21 @@ export function safeEqual(a: string, b: string): boolean {
   return r === 0;
 }
 
-export async function createSessionToken(secret: string): Promise<{ token: string; maxAge: number }> {
+/** Cookie de sessão: v2.<conta>.<expira>.<assinatura> */
+export async function createSessionToken(secret: string, workspaceId: string): Promise<{ token: string; maxAge: number }> {
   const maxAge = MAX_AGE_DAYS * 24 * 3600;
   const exp = Math.floor(Date.now() / 1000) + maxAge;
-  const payload = `v1.${exp}`;
+  const payload = `v2.${workspaceId}.${exp}`;
   return { token: `${payload}.${await hmac(secret, payload)}`, maxAge };
 }
 
-export async function verifySessionToken(token: string | undefined, secret: string): Promise<boolean> {
-  if (!token || !secret) return false;
+/** Devolve o id da conta logada, ou null se o cookie for inválido/expirado. */
+export async function verifySessionToken(token: string | undefined, secret: string): Promise<string | null> {
+  if (!token || !secret) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [v, expStr, sig] = parts;
+  if (parts.length !== 4) return null;
+  const [v, ws, expStr, sig] = parts;
   const exp = Number(expStr);
-  if (v !== "v1" || !Number.isFinite(exp) || exp < Date.now() / 1000) return false;
-  return safeEqual(sig, await hmac(secret, `${v}.${expStr}`));
+  if (v !== "v2" || !/^[0-9a-f-]{36}$/.test(ws) || !Number.isFinite(exp) || exp < Date.now() / 1000) return null;
+  return safeEqual(sig, await hmac(secret, `${v}.${ws}.${expStr}`)) ? ws : null;
 }

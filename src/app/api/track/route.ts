@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { db, runAsWorkspace } from "@/lib/db";
+import { workspaceFromUrl } from "@/lib/workspaces";
 import { metaIdsFromUtms } from "@/lib/utm";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ export async function OPTIONS() {
 const clean = (v: unknown, max = 500) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
 /** Recebe a visita registrada pelo t.js (UTMs + fbclid/fbc/fbp + IP/navegador). */
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const body = await req.json().catch(() => null);
   const vid = clean(body?.vid, 64);
   if (!vid || !/^[a-zA-Z0-9_-]{8,64}$/.test(vid)) return new Response("vid inválido", { status: 400, headers: CORS });
@@ -47,7 +48,14 @@ export async function POST(req: Request) {
   if (utms.utm_source || utms.utm_campaign) Object.assign(row, utms, metaIdsFromUtms(utms));
   for (const k of Object.keys(row)) if (row[k] === null && k !== "id") delete row[k];
 
-  const { error } = await db().from("clicks").upsert(row, { onConflict: "id" });
+  const { error } = await db().from("clicks").upsert(row, { onConflict: "workspace_id,id" });
   if (error) return new Response("erro", { status: 500, headers: CORS });
   return new Response(null, { status: 204, headers: CORS });
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return new Response("conta não encontrada", { status: 404, headers: CORS });
+  return runAsWorkspace(ws, () => handle(req));
 }

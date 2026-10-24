@@ -1,10 +1,13 @@
 import "server-only";
 import { getSetting, setSetting } from "./db";
-import { env } from "./env";
+import { env as serverEnv } from "./env";
+import { currentWorkspace } from "./workspaces";
+
+const NO_ENV = { stripeSecretKey: "", stripeWebhookSecret: "", hotmartHottok: "", digistorePassphrase: "", universalKey: "" };
 
 /**
  * Segredos dos checkouts. Ficam no banco (settings.checkout_secrets), cadastrados pela tela
- * de Integrações. Se um campo não estiver no banco, vale a variável de ambiente.
+ * de Integrações. Se um campo não estiver no banco, vale a variável de ambiente (só na conta principal).
  */
 export type CheckoutSecrets = {
   stripeSecretKey: string;
@@ -26,6 +29,8 @@ async function stored(): Promise<Partial<CheckoutSecrets>> {
 
 export async function getCheckoutSecrets(): Promise<CheckoutSecrets> {
   const s = await stored();
+  // As variáveis de ambiente são da conta principal; contas novas usam só o que cadastraram
+  const env = (await currentWorkspace()).is_owner ? serverEnv : NO_ENV;
   return {
     stripeSecretKey: s.stripeSecretKey || env.stripeSecretKey,
     stripeWebhookSecret: s.stripeWebhookSecret || env.stripeWebhookSecret,

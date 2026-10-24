@@ -5,6 +5,7 @@ import { fmtDateTime } from "@/lib/dates";
 import { getPixels } from "@/lib/capi";
 import { getCheckoutSecrets } from "@/lib/checkouts";
 import { pixelSnippet } from "@/lib/utm";
+import { currentWorkspace, withWorkspace } from "@/lib/workspaces";
 import { ipnInfo, ipnUrl as digistoreIpnUrl, type IpnInfo } from "@/lib/digistore";
 import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
@@ -19,7 +20,8 @@ import {
 
 export default async function Integracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
   const sp = await searchParams;
-  const app = env.appUrl;
+  const ws = await currentWorkspace();
+  const pub = (path: string) => withWorkspace(`${env.appUrl}${path}`, ws);
   const [profiles, accounts, pixels, autoCapi, logs, checkout] = await Promise.all([
     db().from("meta_profiles").select("id"),
     db().from("ad_accounts").select("id", { count: "exact", head: true }).eq("enabled", true),
@@ -31,7 +33,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   const enabledAccounts = accounts;
 
   const tail = (v: string) => `…${v.slice(-6)}`;
-  const universalUrl = `${app}/api/webhooks/universal?key=${checkout.universalKey || "GERE_A_CHAVE"}&platform=kiwify`;
+  const universalUrl = pub(`/api/webhooks/universal?key=${checkout.universalKey || "GERE_A_CHAVE"}&platform=kiwify`);
 
   const tz = env.timezone;
   const [hStripe, hHotmart, hDigi, hUni] = await Promise.all([
@@ -111,7 +113,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   }[] = [
     {
       name: "Stripe",
-      url: `${app}/api/webhooks/stripe`,
+      url: pub("/api/webhooks/stripe"),
       health: hStripe,
       checks: genericChecks(hStripe, "Stripe", "Clique em Reconectar: o segredo do webhook (whsec_) não confere.", "O webhook está criado; o primeiro aviso chega na próxima compra ou no Enviar evento de teste da Stripe."),
       status: checkout.stripeSecretKey ? `chave ${tail(checkout.stripeSecretKey)}` : undefined,
@@ -142,7 +144,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     },
     {
       name: "Hotmart",
-      url: `${app}/api/webhooks/hotmart`,
+      url: pub("/api/webhooks/hotmart"),
       health: hHotmart,
       checks: genericChecks(hHotmart, "Hotmart", "O Hottok salvo é diferente do da Hotmart. Copie de novo em Hotmart → Ferramentas → Webhook → Autenticação.", "Na Hotmart → Ferramentas → Webhook, confira a URL acima e use “Enviar teste”."),
       status: checkout.hotmartHottok ? `hottok ${tail(checkout.hotmartHottok)}` : undefined,
@@ -166,7 +168,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
     },
     {
       name: "Digistore24",
-      url: digistoreIpnUrl(),
+      url: digistoreIpnUrl(ws),
       health: hDigi,
       checks: dsChecks,
       status: checkout.digistoreApiKey ? "via chave de API" : undefined,
@@ -311,8 +313,8 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
                   </ol>
                 </Help>
               </div>
-              <code className="codebox !text-[0.75rem]">{pixelSnippet(app, [p.pixel_id])}</code>
-              <div className="mt-2"><CopyButton text={pixelSnippet(app, [p.pixel_id])} label="Copiar código" /></div>
+              <code className="codebox !text-[0.75rem]">{pixelSnippet(pub("/t.js"), [p.pixel_id])}</code>
+              <div className="mt-2"><CopyButton text={pixelSnippet(pub("/t.js"), [p.pixel_id])} label="Copiar código" /></div>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
               <form action={updatePixelTestCode} className="flex gap-1 items-center">

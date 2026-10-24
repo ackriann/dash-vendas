@@ -68,7 +68,7 @@ Permissões: `ads_read`, `ads_management`, `business_management`, `pages_show_li
 |---|---|
 | `APP_URL` | Endereço do painel, ex.: `https://meupainel.vercel.app` |
 | `APP_TIMEZONE` | `America/Sao_Paulo` |
-| `ADMIN_PASSWORD` | Senha para entrar no painel |
+| `ADMIN_PASSWORD` | Senha antiga do painel: só serve para o primeiro login da conta principal |
 | `SESSION_SECRET` | Texto aleatório longo (`openssl rand -hex 32`) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Do passo 1 |
 | `META_APP_ID`, `META_APP_SECRET` | Opcional — app usado pelo botão “Entrar com Facebook” |
@@ -84,6 +84,13 @@ Permissões: `ads_read`, `ads_management`, `business_management`, `pages_show_li
 > As chaves dos checkouts também podem ser cadastradas em **Integrações → Webhooks dos checkouts**. Na Stripe basta colar a chave secreta e clicar em **Conectar**: o painel cria o webhook e guarda o segredo sozinho. O que for salvo no painel vale mais que a variável de ambiente.
 
 ---
+
+## Contas e dashes
+
+- **Conta** (login por e-mail + senha): cada conta é um painel separado, com perfis Meta, checkouts, webhooks, pixel, vendas, taxas, regras e notificações próprios. A conta principal é a que já existia. Para criar outra, gere um código de convite em **Ajustes → Criar outras contas** e abra `/cadastro`.
+- **Dash** (menu **Dashes**): dentro de uma conta, cada dash mostra só as vendas dos produtos escolhidos e o gasto das contas de anúncio escolhidas. O seletor no topo de Resumo, Vendas e Campanhas troca entre **Todos** e cada dash. Custos de um produto só podem ser ligados ao dash em **Taxas → Vale para**.
+- As URLs públicas (webhooks, `t.js`, cron) das contas que não são a principal levam `?a=<id da conta>`. O painel já mostra as URLs certas em Integrações e UTMs.
+- Atualizando uma instalação antiga: rode `supabase/migrations/003_contas_dashes.sql` no SQL Editor **antes** do deploy. No primeiro login, entre com o seu e-mail e a senha antiga (`ADMIN_PASSWORD`): o e-mail vira o login da conta principal.
 
 ## Primeiros passos dentro do painel
 

@@ -1,7 +1,9 @@
 "use server";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/session";
-import { setSetting } from "@/lib/db";
+import { randomBytes } from "crypto";
+import { rawDb, setSetting } from "@/lib/db";
+import { changePassword, currentWorkspace, forgetWorkspace, setInviteCode } from "@/lib/workspaces";
 import { parseMoneyInput } from "@/lib/money";
 
 export async function saveNotify(formData: FormData) {
@@ -30,4 +32,33 @@ export async function saveCurrency(formData: FormData) {
   await setSetting("base_currency", base);
   await setSetting("fx_rates", rates);
   redirect("/configuracoes?ok=Câmbio salvo. Vale para vendas novas e para o gasto em anúncios.");
+}
+
+// ------------------------------------------------------------------ Conta
+
+export async function saveAccountName(formData: FormData) {
+  await requireAuth();
+  const ws = await currentWorkspace();
+  const name = String(formData.get("name") ?? "").trim().slice(0, 60);
+  await rawDb().from("workspaces").update({ name: name || null }).eq("id", ws.id);
+  forgetWorkspace(ws.id);
+  redirect("/configuracoes?ok=Nome da conta salvo.");
+}
+
+export async function savePassword(formData: FormData) {
+  await requireAuth();
+  const ws = await currentWorkspace();
+  const next = String(formData.get("next") ?? "");
+  if (next !== String(formData.get("next2") ?? "")) redirect("/configuracoes?erro=As senhas novas não conferem.");
+  const err = await changePassword(ws.id, String(formData.get("current") ?? ""), next);
+  redirect(err ? `/configuracoes?erro=${encodeURIComponent(err)}` : "/configuracoes?ok=Senha trocada.");
+}
+
+/** Só a conta principal gera o código de convite da tela /cadastro. */
+export async function saveInviteCode(formData: FormData) {
+  await requireAuth();
+  if (!(await currentWorkspace()).is_owner) redirect("/configuracoes?erro=Só a conta principal mexe no convite.");
+  const clear = formData.get("clear") === "1";
+  await setInviteCode(clear ? "" : randomBytes(6).toString("hex"));
+  redirect(`/configuracoes?ok=${encodeURIComponent(clear ? "Cadastro fechado: ninguém consegue criar conta." : "Código de convite novo gerado.")}`);
 }

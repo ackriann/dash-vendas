@@ -13,9 +13,12 @@ export async function addFee(formData: FormData) {
   const value = parseMoneyInput(formData.get("value"));
   const platform = String(formData.get("platform") ?? "") || null;
   const product = String(formData.get("product") ?? "").trim() || null;
+  const dashId = String(formData.get("dashboard_id") ?? "");
+  // Dash só da própria conta (a consulta é filtrada pela conta logada)
+  const dash = /^[0-9a-f-]{36}$/i.test(dashId) ? (await db().from("dashboards").select("id").eq("id", dashId).maybeSingle()).data : null;
   if (!name || !KINDS.includes(kind) || !(value >= 0)) redirect("/taxas?erro=Preencha nome, tipo e valor.");
   const perSale = kind.endsWith("_sale");
-  const { error } = await db().from("fees").insert({ name, kind, value, platform: perSale ? platform : null, product: perSale ? product : null });
+  const { error } = await db().from("fees").insert({ name, kind, value, platform: perSale ? platform : null, product: perSale ? product : null, dashboard_id: dash?.id ?? null });
   redirect(error ? `/taxas?erro=${encodeURIComponent(error.message)}` : "/taxas?ok=Taxa adicionada.");
 }
 

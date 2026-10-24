@@ -3,6 +3,8 @@ import { resolveRange } from "@/lib/dates";
 import { fmtMoney, fmtNum, fmtPct } from "@/lib/money";
 import { METRICS, buildAdRows, metric, type AdLevel, type AdRow, type MetricDef, type MetricKey } from "@/lib/ads";
 import { getContext } from "@/lib/report";
+import { listDashboards } from "@/lib/dashboards";
+import DashBar from "@/components/DashBar";
 import RangeFilter from "@/components/RangeFilter";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
@@ -30,7 +32,7 @@ function fmtMetric(m: MetricDef, v: number | null, cur: string): string {
 
 export default async function Campanhas({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
-  const ctx = await getContext();
+  const [ctx, dashes] = await Promise.all([getContext({ useDash: true }), listDashboards()]);
   const range = resolveRange(sp, ctx.tz);
   const level: AdLevel = LEVELS.some(([l]) => l === sp.level) ? (sp.level as AdLevel) : "campaign";
   const showAll = sp.todos === "1";
@@ -49,7 +51,9 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
   if (!ctx.accounts.length) {
     return (
       <div className="space-y-4">
+        <DashBar dashes={dashes} active={ctx.dash} path="/campanhas" />
         <h1>Campanhas</h1>
+        {ctx.dash && <p className="notice notice-warn">O dash <b>{ctx.dash.name}</b> não tem contas de anúncio ativas. Ajuste em <Link className="underline" href="/dashes">Dashes</Link>.</p>}
         <p className="notice notice-warn">
           {ctx.profiles.length ? "Ative as contas de anúncio" : "Conecte um perfil da Meta (token + app) e ative as contas de anúncio"} em{" "}
           <Link className="underline" href="/perfis">Perfis Meta</Link>.
@@ -97,9 +101,10 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
 
   return (
     <div className="space-y-5">
+      <DashBar dashes={dashes} active={ctx.dash} path="/campanhas" />
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
-          <h1>Campanhas</h1>
+          <h1>Campanhas{ctx.dash ? ` · ${ctx.dash.name}` : ""}</h1>
           <p className="sub">{range.label} · vendas reais cruzadas com o gasto da Meta</p>
         </div>
         <RangeFilter range={range} path="/campanhas" keep={keep} />

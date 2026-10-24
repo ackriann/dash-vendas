@@ -1,3 +1,4 @@
+import { publicUrl } from "@/lib/workspaces";
 import { env } from "@/lib/env";
 import { getSetting } from "@/lib/db";
 import { fmtDateTime } from "@/lib/dates";
@@ -30,7 +31,7 @@ export default async function Regras({ searchParams }: { searchParams: Promise<{
     getSetting<string>("cron_key", ""),
     getSetting<string>("base_currency", "BRL"),
   ]);
-  const cronUrl = cronKey ? `${env.appUrl}/api/cron/rules?key=${cronKey}` : "";
+  const cronUrl = cronKey ? await publicUrl(`/api/cron/rules?key=${cronKey}`) : "";
 
   return (
     <div className="space-y-6 max-w-5xl">

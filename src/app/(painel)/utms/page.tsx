@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+import { publicUrl } from "@/lib/workspaces";
 import Link from "next/link";
 import { RECOMMENDED_UTM, pixelSnippet } from "@/lib/utm";
 import { getPixels } from "@/lib/capi";
@@ -8,12 +8,12 @@ import Help from "@/components/Help";
 import Acc from "@/components/Acc";
 
 export default async function Utms() {
-  const app = env.appUrl;
+  const tjs = await publicUrl("/t.js");
   const pixels = await getPixels();
   const main = pixels.filter((p) => p.is_default).concat(pixels.filter((p) => !p.is_default)).slice(0, 1);
   const pixelAttr = main.length ? ` data-pixel="${main.map((p) => p.pixel_id).join(",")}"` : "";
-  const script = main.length ? pixelSnippet(app, main.map((p) => p.pixel_id)) : `<script src="${app}/t.js" async></script>`;
-  const scriptDomains = `<script src="${app}/t.js"${pixelAttr} data-domains="checkout.meusite.com" async></script>`;
+  const script = main.length ? pixelSnippet(tjs, main.map((p) => p.pixel_id)) : `<script src="${tjs}" async></script>`;
+  const scriptDomains = `<script src="${tjs}"${pixelAttr} data-domains="checkout.meusite.com" async></script>`;
 
   return (
     <div className="space-y-6 max-w-4xl">

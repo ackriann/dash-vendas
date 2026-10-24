@@ -1,6 +1,7 @@
 import "server-only";
 import { createHmac } from "crypto";
 import { env } from "./env";
+import { currentWorkspace, withWorkspace, type Workspace } from "./workspaces";
 
 // =====================================================================
 // API da Digistore24 — só a parte de IPN (criar, consultar e apagar a
@@ -14,12 +15,14 @@ const BASE = "https://www.digistore24.com/api/call";
  * Chave de segurança que vai na URL do IPN. Com ela a Digistore não precisa de senha
  * (o campo de senha SHA da conexão pode ficar vazio). Derivada do SESSION_SECRET.
  */
-export const digistoreKey = () => createHmac("sha256", env.sessionSecret).update("digistore-ipn").digest("hex").slice(0, 32);
+export const digistoreKey = (ws: Workspace) =>
+  createHmac("sha256", env.sessionSecret).update(ws.is_owner ? "digistore-ipn" : `digistore-ipn:${ws.id}`).digest("hex").slice(0, 32);
 
-export const ipnUrl = () => `${env.appUrl}/api/webhooks/digistore?key=${digistoreKey()}`;
+export const ipnUrl = (ws: Workspace) => withWorkspace(`${env.appUrl}/api/webhooks/digistore?key=${digistoreKey(ws)}`, ws);
 
-/** Identifica a conexão criada por este painel na conta da Digistore. */
-export const domainId = () => `painel-${new URL(env.appUrl).hostname}`.replace(/[^a-z0-9.-]/gi, "-").slice(0, 60);
+/** Identifica a conexão criada por este painel (e por esta conta) na conta da Digistore. */
+export const domainId = (ws: Workspace) =>
+  `painel-${new URL(env.appUrl).hostname}${ws.is_owner ? "" : `-${ws.id.slice(0, 8)}`}`.replace(/[^a-z0-9.-]/gi, "-").slice(0, 60);
 
 async function call<T = any>(fn: string, apiKey: string, params: Record<string, string> = {}, method: "GET" | "POST" | "DELETE" = "POST"): Promise<T> {
   const body = new URLSearchParams(params);
@@ -43,11 +46,12 @@ async function call<T = any>(fn: string, apiKey: string, params: Record<string, 
 
 /** Cria (ou atualiza) a conexão IPN apontando para o painel. Devolve a senha gerada. */
 export async function setupIpn(apiKey: string): Promise<{ passphrase: string }> {
+  const ws = await currentWorkspace();
   const data = await call<{ sha_passphrase?: string }>("ipnSetup", apiKey, {
-    ipn_url: ipnUrl(),
+    ipn_url: ipnUrl(ws),
     name: "Painel de Vendas",
     product_ids: "all",
-    domain_id: domainId(),
+    domain_id: domainId(ws),
     categories: "orders",
     transactions: "payment,refund,chargeback,payment_missed",
     timing: "before_thankyou",
@@ -68,13 +72,14 @@ export interface IpnInfo {
 
 /** Consulta na Digistore se a conexão do painel existe e para onde aponta. */
 export async function ipnInfo(apiKey: string): Promise<IpnInfo> {
+  const ws = await currentWorkspace();
   try {
-    const d = await call<Record<string, any>>("ipnInfo", apiKey, { domain_id: domainId() }, "GET");
+    const d = await call<Record<string, any>>("ipnInfo", apiKey, { domain_id: domainId(ws) }, "GET");
     const url = (d.url ?? d.ipn_url ?? null) as string | null;
     return {
       exists: !!url,
       url,
-      urlOk: !!url && url.includes("/api/webhooks/digistore") && url.includes(digistoreKey()),
+      urlOk: !!url && url.includes("/api/webhooks/digistore") && url.includes(digistoreKey(ws)),
       transactions: d.transactions ?? null,
       products: d.product_ids ?? null,
     };
@@ -86,5 +91,5 @@ export async function ipnInfo(apiKey: string): Promise<IpnInfo> {
 }
 
 export async function deleteIpn(apiKey: string): Promise<void> {
-  await call("ipnDelete", apiKey, { domain_id: domainId() }, "DELETE");
+  await call("ipnDelete", apiKey, { domain_id: domainId(await currentWorkspace()) }, "DELETE");
 }

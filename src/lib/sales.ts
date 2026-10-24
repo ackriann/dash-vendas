@@ -145,7 +145,7 @@ export async function ingestSale(input: NormalizedSale): Promise<{ id: string; s
 
   const { data: saved, error } = await supa
     .from("sales")
-    .upsert(row, { onConflict: "platform,external_id" })
+    .upsert(row, { onConflict: "workspace_id,platform,external_id" })
     .select("*")
     .single();
   if (error) throw new Error(error.message);

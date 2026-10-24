@@ -8,7 +8,8 @@ function req(name: string): string {
 export const env = {
   get supabaseUrl() { return req("SUPABASE_URL"); },
   get supabaseServiceKey() { return req("SUPABASE_SERVICE_ROLE_KEY"); },
-  get adminPassword() { return req("ADMIN_PASSWORD"); },
+  /** Senha antiga do painel: só serve para o primeiro login da conta principal. */
+  get adminPasswordOptional() { return process.env.ADMIN_PASSWORD || ""; },
   get sessionSecret() { return req("SESSION_SECRET"); },
   get appUrl() { return (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""); },
   get timezone() { return process.env.APP_TIMEZONE || "America/Sao_Paulo"; },

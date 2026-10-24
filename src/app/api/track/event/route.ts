@@ -1,5 +1,6 @@
 import { after } from "next/server";
-import { logEvent } from "@/lib/db";
+import { workspaceFromUrl } from "@/lib/workspaces";
+import { currentWorkspaceId, logEvent, runAsWorkspace } from "@/lib/db";
 import { SITE_EVENTS, getPixelsByIds, sendSiteEvent } from "@/lib/capi";
 
 export const runtime = "nodejs";
@@ -25,7 +26,7 @@ const lastErr = new Map<string, number>();
  * Evento do site vindo do t.js → API de Conversões dos pixels informados.
  * Só vale para pixels cadastrados no painel (é de lá que vem o token).
  */
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const body = await req.json().catch(() => null);
   const vid = clean(body?.vid, 64);
   const name = clean(body?.event_name, 40);
@@ -58,8 +59,9 @@ export async function POST(req: Request) {
     custom_data,
   };
 
-  // Responde na hora; o envio para a Meta acontece depois
-  after(async () => {
+  // Responde na hora; o envio para a Meta acontece depois (na mesma conta)
+  const ws = await currentWorkspaceId();
+  after(() => runAsWorkspace(ws, async () => {
     const pixels = await getPixelsByIds(ids);
     await Promise.all(
       pixels.map(async (px) => {
@@ -70,6 +72,13 @@ export async function POST(req: Request) {
         }
       }),
     );
-  });
+  }));
   return new Response(null, { status: 204, headers: CORS });
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return new Response("conta não encontrada", { status: 404, headers: CORS });
+  return runAsWorkspace(ws, () => handle(req));
 }

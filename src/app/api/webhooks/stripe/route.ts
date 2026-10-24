@@ -1,6 +1,7 @@
 import Stripe from "stripe";
+import { workspaceFromUrl } from "@/lib/workspaces";
 import { getCheckoutSecrets } from "@/lib/checkouts";
-import { db, logEvent } from "@/lib/db";
+import { db, logEvent, runAsWorkspace } from "@/lib/db";
 import { ingestSale, type SaleStatus } from "@/lib/sales";
 
 export const runtime = "nodejs";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * O vid do script de rastreamento chega em client_reference_id (Payment Links aceitam
  * ?client_reference_id=... na URL) ou em metadata.vid.
  */
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const body = await req.text();
   const sig = req.headers.get("stripe-signature") ?? "";
   const secrets = await getCheckoutSecrets();
@@ -118,4 +119,11 @@ async function updateByPaymentIntent(pi: string | null, status: SaleStatus) {
   const { data } = await db().from("sales").select("*").eq("platform", "stripe").eq("external_id", pi).maybeSingle();
   if (!data) return;
   await ingestSale({ ...data, status, gross_amount: Number(data.gross_amount), raw: data.raw });
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return new Response("conta não encontrada", { status: 404 });
+  return runAsWorkspace(ws, () => handle(req));
 }

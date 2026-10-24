@@ -23,7 +23,10 @@
 (function () {
   try {
     var script = document.currentScript || document.querySelector('script[src*="/t.js"]');
-    var endpoint = new URL(script.src).origin + "/api/track";
+    // Conta do painel: ?a=<id> no src do script (sem ele, conta principal)
+    var account = new URL(script.src).searchParams.get("a") || script.getAttribute("data-account") || "";
+    var qs = account ? "?a=" + encodeURIComponent(account) : "";
+    var endpoint = new URL(script.src).origin + "/api/track" + qs;
     var extra = (script.getAttribute("data-domains") || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
 
     var UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
@@ -91,8 +94,8 @@
         url: location.href.slice(0, 1000), fbc: getCookie("_fbc"), fbp: getCookie("_fbp")
       });
       try {
-        if (navigator.sendBeacon) navigator.sendBeacon(origin + "/api/track/event", new Blob([body], { type: "application/json" }));
-        else fetch(origin + "/api/track/event", { method: "POST", body: body, headers: { "Content-Type": "application/json" }, keepalive: true });
+        if (navigator.sendBeacon) navigator.sendBeacon(origin + "/api/track/event" + qs, new Blob([body], { type: "application/json" }));
+        else fetch(origin + "/api/track/event" + qs, { method: "POST", body: body, headers: { "Content-Type": "application/json" }, keepalive: true });
       } catch (e) {}
     }
 

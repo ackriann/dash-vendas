@@ -7,6 +7,7 @@ import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
 import Help from "@/components/Help";
 import Acc from "@/components/Acc";
+import { listDashboards } from "@/lib/dashboards";
 import { addFee, deleteFee, toggleFee, updateFee } from "./actions";
 
 const PRESETS: { name: string; kind: FeeKind; value: string; hint: string }[] = [
@@ -20,11 +21,13 @@ const PRESETS: { name: string; kind: FeeKind; value: string; hint: string }[] = 
 
 export default async function Taxas({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
   const sp = await searchParams;
-  const [fees, base, prod] = await Promise.all([
+  const [fees, base, prod, dashes] = await Promise.all([
     loadFees(),
     getSetting<string>("base_currency", "BRL"),
     db().from("sales").select("product_name").not("product_name", "is", null).order("created_at", { ascending: false }).limit(1000),
+    listDashboards(),
   ]);
+  const dashName = new Map(dashes.map((d) => [d.id, d.name]));
   const products = [...new Set((prod.data ?? []).map((r: any) => r.product_name as string))].sort();
   const fmtVal = (kind: FeeKind, v: number) => (kind.startsWith("percent") ? `${fmtNum(v, 2)}%` : fmtMoney(v, base));
   const existing = new Set(fees.map((f) => f.name));
@@ -53,7 +56,7 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
             <li><b>Valor fixo por venda:</b> tarifa fixa do gateway, custo do produto, frete.</li>
             <li><b>% sobre gasto em anúncios:</b> impostos cobrados pela Meta na fatura.</li>
             <li><b>Custo fixo por dia:</b> ferramentas e equipe (custo mensal ÷ 30).</li>
-            <li>Dá para aplicar só numa plataforma ou só num produto.</li>
+            <li>Dá para aplicar só numa plataforma, só num produto ou só num dash. Custo sem dash entra em todos os dashes.</li>
             <li>Vale para o Resumo, Campanhas e cada venda. Mudar uma taxa recalcula todo o histórico.</li>
           </ul>
         </Help>
@@ -79,6 +82,7 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
                   {f.platform || f.product ? (
                     [f.platform && (PLATFORM_LABEL[f.platform] ?? f.platform), f.product].filter(Boolean).join(" · ")
                   ) : <span className="text-muted">Todas as vendas</span>}
+                  {f.dashboard_id && <span className="block text-xs text-muted">só no dash {dashName.get(f.dashboard_id) ?? "removido"}</span>}
                 </td>
                 <td>
                   <form action={updateFee} className="flex items-center gap-1">
@@ -121,6 +125,14 @@ export default async function Taxas({ searchParams }: { searchParams: Promise<{ 
             <input className="input" name="product" list="produtos" placeholder="Todos os produtos" />
             <datalist id="produtos">{products.map((p) => <option key={p} value={p} />)}</datalist>
           </label>
+          {dashes.length > 0 && (
+            <label className="field sm:col-span-2"><span className="label">Vale para</span>
+              <select className="select" name="dashboard_id" defaultValue="">
+                <option value="">Todos os dashes</option>
+                {dashes.map((d) => <option key={d.id} value={d.id}>Só no dash {d.name}</option>)}
+              </select>
+            </label>
+          )}
           <div className="sm:col-span-2"><SubmitButton className="btn btn-primary" pendingText="Adicionando…">Adicionar taxa</SubmitButton></div>
         </form>
         </Acc>

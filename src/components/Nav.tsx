@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { href: "/", label: "Resumo", icon: "M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z" },
+  { href: "/dashes", label: "Dashes", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
   { href: "/vendas", label: "Vendas", icon: "M4 6h16M4 12h16M4 18h10" },
   { href: "/campanhas", label: "Campanhas", icon: "M4 15V9l12-5v16L4 15zm12-4h4" },
   { href: "/regras", label: "Regras", icon: "M13 3L4 14h7l-1 7 9-11h-7l1-7z" },
@@ -23,7 +24,7 @@ function Icon({ d }: { d: string }) {
   );
 }
 
-export default function Nav() {
+export default function Nav({ account }: { account: string }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   return (
@@ -48,7 +49,8 @@ export default function Nav() {
             </Link>
           ))}
         </nav>
-        <form action="/api/logout" method="post" className="mt-auto px-2">
+        <form action="/api/logout" method="post" className="mt-auto px-2 space-y-1">
+          <p className="text-xs text-muted truncate" title={account}>{account}</p>
           <button className="text-muted hover:text-ink text-sm">Sair</button>
         </form>
       </aside>

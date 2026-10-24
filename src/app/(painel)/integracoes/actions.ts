@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/session";
 import { db, setSetting } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCheckoutSecrets, saveCheckoutSecrets } from "@/lib/checkouts";
+import { publicUrl } from "@/lib/workspaces";
 import { deleteIpn, setupIpn } from "@/lib/digistore";
 
 function go(key: "ok" | "erro", msg: string): never {
@@ -69,7 +70,7 @@ export async function connectStripe(formData: FormData) {
   await requireAuth();
   const key = String(formData.get("secret_key") ?? "").trim();
   if (!/^(sk|rk)_(live|test)_/.test(key)) go("erro", "Cole a chave secreta da Stripe (começa com sk_live_ ou sk_test_).");
-  const url = `${env.appUrl}/api/webhooks/stripe`;
+  const url = await publicUrl("/api/webhooks/stripe");
   if (!url.startsWith("https://") || /localhost|127\.0\.0\.1/.test(url)) {
     go("erro", "A conexão automática só funciona com o painel publicado (APP_URL com https). Use a configuração manual ou conecte depois do deploy.");
   }
@@ -107,7 +108,7 @@ export async function disconnectStripe() {
   if (stripeSecretKey) {
     try {
       const stripe = new Stripe(stripeSecretKey);
-      const url = `${env.appUrl}/api/webhooks/stripe`;
+      const url = await publicUrl("/api/webhooks/stripe");
       const existing = await stripe.webhookEndpoints.list({ limit: 100 });
       for (const ep of existing.data) if (ep.url === url) await stripe.webhookEndpoints.del(ep.id);
     } catch {

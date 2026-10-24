@@ -1,5 +1,6 @@
 import { getCheckoutSecrets } from "@/lib/checkouts";
-import { logEvent } from "@/lib/db";
+import { workspaceFromUrl } from "@/lib/workspaces";
+import { logEvent, runAsWorkspace } from "@/lib/db";
 import { safeEqual } from "@/lib/auth";
 import { ingestSale, type SaleStatus } from "@/lib/sales";
 import { utmsFromQuery } from "@/lib/utm";
@@ -24,7 +25,7 @@ const EVENT_STATUS: Record<string, SaleStatus> = {
  * Autenticação: header X-HOTMART-HOTTOK (ou campo hottok no corpo, versão antiga).
  * O vid do script de rastreamento chega em purchase.origin.sck.
  */
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const payload = await req.json().catch(() => null);
   if (!payload) return new Response("JSON inválido", { status: 400 });
 
@@ -88,4 +89,11 @@ export async function POST(req: Request) {
     await logEvent("hotmart", event, false, e?.message ?? "erro", payload);
     return new Response("erro ao processar", { status: 500 });
   }
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return new Response("conta não encontrada", { status: 404 });
+  return runAsWorkspace(ws, () => handle(req));
 }

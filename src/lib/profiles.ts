@@ -261,7 +261,7 @@ export async function syncAccounts(profile: MetaProfile): Promise<number> {
   }));
   // Se outra conexão já tem essa conta, ela passa para este perfil (o token mais novo)
   if (rows.length) {
-    const { error } = await db().from("ad_accounts").upsert(rows, { onConflict: "id" });
+    const { error } = await db().from("ad_accounts").upsert(rows, { onConflict: "workspace_id,id" });
     if (error) throw new Error(error.message);
   }
   const ids = new Set(rows.map((r) => r.id));

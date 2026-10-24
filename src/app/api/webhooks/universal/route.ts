@@ -1,5 +1,6 @@
 import { getCheckoutSecrets } from "@/lib/checkouts";
-import { logEvent } from "@/lib/db";
+import { workspaceFromUrl } from "@/lib/workspaces";
+import { logEvent, runAsWorkspace } from "@/lib/db";
 import { safeEqual } from "@/lib/auth";
 import { ingestSale, mapStatus } from "@/lib/sales";
 import { utmsFromQuery } from "@/lib/utm";
@@ -24,7 +25,7 @@ export const dynamic = "force-dynamic";
  *   utm_source, utm_medium, utm_campaign, utm_content, utm_term (ou objeto "utms"/"tracking")
  *   created_at | date                                           -> data da venda
  */
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const url = new URL(req.url);
   const key = url.searchParams.get("key") ?? req.headers.get("x-webhook-key") ?? "";
   const { universalKey } = await getCheckoutSecrets();
@@ -120,4 +121,11 @@ function toIso(v: string | null): string | null {
   const n = Number(v);
   const d = Number.isFinite(n) && n > 1e9 ? new Date(n > 1e12 ? n : n * 1000) : new Date(v);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return new Response("conta não encontrada", { status: 404 });
+  return runAsWorkspace(ws, () => handle(req));
 }

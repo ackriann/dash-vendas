@@ -62,14 +62,15 @@ export function utmsFromQuery(qs: string | null | undefined): Utms {
 }
 
 /** Código do pixel para colar no site (mesmo formato de instalação da Utmify). */
-export function pixelSnippet(appUrl: string, pixelIds: string[]): string {
+/** scriptSrc = URL do t.js da conta (com ?a= nas contas que não são a principal). */
+export function pixelSnippet(scriptSrc: string, pixelIds: string[]): string {
   return `<script>
   window.painelPixelId = "${pixelIds.join(",")}";
   (function () {
     var p = document.createElement("script");
     p.setAttribute("async", "");
     p.setAttribute("defer", "");
-    p.setAttribute("src", "${appUrl}/t.js");
+    p.setAttribute("src", "${scriptSrc}");
     document.head.appendChild(p);
   })();
 </script>`;

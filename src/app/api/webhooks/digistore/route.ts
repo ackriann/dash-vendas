@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
+import { currentWorkspace, workspaceFromUrl } from "@/lib/workspaces";
 import { getCheckoutSecrets } from "@/lib/checkouts";
-import { db, logEvent } from "@/lib/db";
+import { db, logEvent, runAsWorkspace } from "@/lib/db";
 import { safeEqual } from "@/lib/auth";
 import { ingestSale, type SaleStatus } from "@/lib/sales";
 import { digistoreKey } from "@/lib/digistore";
@@ -27,17 +28,17 @@ export async function GET() {
   return text("OK");
 }
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const ct = req.headers.get("content-type") ?? "";
   const raw = await req.text().catch(() => "");
   const params = parseBody(raw);
   // Campos que vierem na própria URL (menos a chave) também valem
-  for (const [k, v] of new URL(req.url).searchParams) if (k !== "key" && !(k in params)) params[k] = v;
+  for (const [k, v] of new URL(req.url).searchParams) if (k !== "key" && k !== "a" && !(k in params)) params[k] = v;
 
   // Vale a chave na URL (sem senha na Digistore) OU a assinatura SHA com a senha salva no painel
   const key = new URL(req.url).searchParams.get("key") ?? "";
   const { digistorePassphrase } = await getCheckoutSecrets();
-  const keyOk = !!key && safeEqual(key, digistoreKey());
+  const keyOk = !!key && safeEqual(key, digistoreKey(await currentWorkspace()));
   const shaOk = !!digistorePassphrase && !!params.sha_sign && validSignature(params, digistorePassphrase);
   if (!keyOk && !shaOk) {
     const why = key
@@ -183,4 +184,11 @@ function validSignature(params: Record<string, string>, passphrase: string): boo
   const str = keys.map((k) => `${k}=${decodeEntities(String(params[k]))}${passphrase}`).join("");
   const calc = createHash("sha512").update(str, "utf8").digest("hex").toUpperCase();
   return safeEqual(calc, received);
+}
+
+/** A conta vem do ?a= da URL (sem ele, conta principal). */
+export async function POST(req: Request) {
+  const ws = await workspaceFromUrl(req.url);
+  if (!ws) return text("ERROR: conta não encontrada", 404);
+  return runAsWorkspace(ws, () => handle(req));
 }

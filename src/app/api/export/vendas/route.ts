@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { fmtDateTime, resolveRange } from "@/lib/dates";
 import { STATUS_LABEL, platformLabel } from "@/lib/sales";
 import { nameFromUtm } from "@/lib/utm";
+import { getActiveDashboard } from "@/lib/dashboards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ const cell = (v: unknown) => {
 export async function GET(req: Request) {
   const sp = Object.fromEntries(new URL(req.url).searchParams);
   const range = resolveRange({ range: sp.range ?? "7d", since: sp.since, until: sp.until }, env.timezone);
+  const dash = await getActiveDashboard();
   const lines = [COLS.map(([h]) => h).join(";")];
   for (let from = 0; from < 100000; from += 1000) {
     let q = db()
@@ -48,6 +50,7 @@ export async function GET(req: Request) {
       .lt("created_at", range.endIso)
       .order("created_at", { ascending: false })
       .range(from, from + 999);
+    if (dash?.products.length) q = q.in("product_name", dash.products);
     if (sp.status) q = q.eq("status", sp.status);
     if (sp.platform) q = q.eq("platform", sp.platform);
     const { data, error } = await q;

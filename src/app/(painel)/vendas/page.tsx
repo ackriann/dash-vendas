@@ -11,6 +11,8 @@ import { nameFromUtm } from "@/lib/utm";
 import RangeFilter from "@/components/RangeFilter";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
+import DashBar from "@/components/DashBar";
+import { getActiveDashboard, listDashboards } from "@/lib/dashboards";
 import { createManualSale, deleteSale, dispatchToPixel, setSaleStatus } from "./actions";
 
 type SP = Promise<{
@@ -25,6 +27,7 @@ export default async function Vendas({ searchParams }: { searchParams: SP }) {
   const tz = env.timezone;
   const range = resolveRange({ range: sp.range ?? "7d", since: sp.since, until: sp.until }, tz);
   const page = Math.max(1, Number(sp.page) || 1);
+  const [dash, dashes] = await Promise.all([getActiveDashboard(), listDashboards()]);
 
   let query = db()
     .from("sales")
@@ -33,6 +36,7 @@ export default async function Vendas({ searchParams }: { searchParams: SP }) {
     .lt("created_at", range.endIso)
     .order("created_at", { ascending: false })
     .range((page - 1) * PAGE, page * PAGE - 1);
+  if (dash?.products.length) query = query.in("product_name", dash.products);
   if (sp.status) query = query.eq("status", sp.status);
   if (sp.platform) query = query.eq("platform", sp.platform);
   if (sp.q) {
@@ -62,9 +66,10 @@ export default async function Vendas({ searchParams }: { searchParams: SP }) {
 
   return (
     <div className="space-y-5">
+      <DashBar dashes={dashes} active={dash} path="/vendas" />
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
-          <h1>Vendas</h1>
+          <h1>Vendas{dash ? ` · ${dash.name}` : ""}</h1>
           <p className="sub">{range.label} · {count ?? 0} registro(s)</p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">

@@ -25,6 +25,8 @@ export default function PushToggle({ vapidKey }: { vapidKey: string }) {
       const reg = await navigator.serviceWorker.register("/sw.js");
       if (Notification.permission === "denied") return setState("denied");
       const sub = await reg.pushManager.getSubscription();
+      // O aparelho pode estar inscrito em outra conta: registra também na conta logada
+      if (sub) fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub) }).catch(() => {});
       setState(sub ? "on" : "off");
     })().catch(() => setState("unsupported"));
   }, []);

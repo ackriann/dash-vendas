@@ -8,17 +8,19 @@ import { nameFromUtm } from "@/lib/utm";
 import RangeFilter from "@/components/RangeFilter";
 import ProfitStrip from "@/components/ProfitStrip";
 import SalesChart from "@/components/SalesChart";
+import DashBar from "@/components/DashBar";
+import { listDashboards } from "@/lib/dashboards";
 
 type SP = Promise<{ range?: string; since?: string; until?: string; conta?: string; plataforma?: string; produto?: string }>;
 
 export default async function Dashboard({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
-  const ctx = await getContext();
+  const [ctx, dashes] = await Promise.all([getContext({ useDash: true }), listDashboards()]);
   const range = resolveRange(sp, ctx.tz);
   const accounts = sp.conta ? ctx.accounts.filter((a) => a.id === sp.conta) : ctx.accounts;
 
   const [allSales, spend, accountCampaigns] = await Promise.all([
-    loadSales(range),
+    loadSales(range, ctx.dash),
     loadSpend(range, accounts, ctx.base, ctx.rates),
     // Filtro por conta: só entram as vendas das campanhas daquela conta
     sp.conta && accounts[0]
@@ -79,9 +81,10 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
 
   return (
     <div className="space-y-5">
+      <DashBar dashes={dashes} active={ctx.dash} path="/" />
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
-          <h1>Resumo</h1>
+          <h1>{ctx.dash ? ctx.dash.name : "Resumo"}</h1>
           <p className="sub">{range.label}</p>
         </div>
         <RangeFilter range={range} path="/" keep={keep} />
