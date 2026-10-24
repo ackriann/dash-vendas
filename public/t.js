@@ -33,7 +33,7 @@
     var CHECKOUT_HOSTS = [
       "pay.hotmart.com", "checkout.hotmart.com", "go.hotmart.com", "digistore24.com", "buy.stripe.com", "checkout.stripe.com",
       "pay.kiwify.com.br", "checkout.perfectpay.com.br", "sun.eduzz.com", "chk.eduzz.com", "pay.cakto.com.br", "checkout.ticto.app",
-      "pay.lastlink.com", "checkout.payt.com.br", "pay.greenn.com.br", "pay.braip.com", "seguro.yampi.com.br", "pay.monetizze.com.br"
+      "pay.lastlink.com", "cooud.com", "checkout.payt.com.br", "pay.greenn.com.br", "pay.braip.com", "seguro.yampi.com.br", "pay.monetizze.com.br"
     ].concat(extra);
     var DAYS = 90;
 

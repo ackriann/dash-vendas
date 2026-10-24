@@ -17,6 +17,10 @@ export type CheckoutSecrets = {
   /** chave de API da Digistore24 (quando a conexão foi criada pelo painel) */
   digistoreApiKey: string;
   universalKey: string;
+  /** webhook_secret (whsec_...) do destino criado na Cooud */
+  cooudWebhookSecret: string;
+  /** chave cooud_sk_live_* opcional, para completar os pedidos pela API */
+  cooudApiKey: string;
 };
 
 export type CheckoutSecretKey = keyof CheckoutSecrets;
@@ -38,6 +42,8 @@ export async function getCheckoutSecrets(): Promise<CheckoutSecrets> {
     digistorePassphrase: s.digistorePassphrase || env.digistorePassphrase,
     digistoreApiKey: s.digistoreApiKey || "",
     universalKey: s.universalKey || env.universalKey,
+    cooudWebhookSecret: s.cooudWebhookSecret || "",
+    cooudApiKey: s.cooudApiKey || "",
   };
 }
 

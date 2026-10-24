@@ -20,6 +20,7 @@ export const PLATFORM_LABEL: Record<string, string> = {
   stripe: "Stripe",
   hotmart: "Hotmart",
   digistore: "Digistore24",
+  cooud: "Cooud",
   universal: "Universal",
   manual: "Manual",
 };

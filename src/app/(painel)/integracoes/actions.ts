@@ -7,6 +7,7 @@ import { db, setSetting } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCheckoutSecrets, saveCheckoutSecrets } from "@/lib/checkouts";
 import { publicUrl } from "@/lib/workspaces";
+import { checkCooudKey } from "@/lib/cooud";
 import { deleteIpn, setupIpn } from "@/lib/digistore";
 
 function go(key: "ok" | "erro", msg: string): never {
@@ -167,10 +168,34 @@ export async function newUniversalKey() {
   go("ok", "Nova chave gerada. Atualize a URL nos checkouts que já usavam a antiga.");
 }
 
+/** Cooud: segredo do webhook (obrigatório) + chave de API (opcional, testada na hora). */
+export async function saveCooud(formData: FormData) {
+  await requireAuth();
+  const secret = String(formData.get("webhook_secret") ?? "").trim();
+  const apiKey = String(formData.get("api_key") ?? "").trim();
+  const current = await getCheckoutSecrets();
+  if (!secret && !current.cooudWebhookSecret) go("erro", "Cole o segredo do webhook da Cooud (começa com whsec_).");
+  if (secret && !/^whsec_[A-Za-z0-9_-]{16,}$/.test(secret)) go("erro", "O segredo do webhook da Cooud começa com whsec_. Copie de novo na tela de criação do webhook.");
+  if (apiKey) {
+    if (!/^cooud_sk_(live|sandbox)_/.test(apiKey)) go("erro", "A chave de API da Cooud começa com cooud_sk_live_ (Store → Integrations → Chaves da API v2).");
+    let error: string | null = null;
+    try {
+      await checkCooudKey(apiKey);
+    } catch (e: any) {
+      error = e?.message ?? "erro";
+    }
+    if (error) go("erro", error);
+  }
+  await saveCheckoutSecrets({ ...(secret ? { cooudWebhookSecret: secret } : {}), ...(apiKey ? { cooudApiKey: apiKey } : {}) });
+  go("ok", apiKey ? "Cooud conectada: webhook e chave de API salvos." : "Cooud conectada: segredo do webhook salvo.");
+}
+
 export async function clearCheckout(formData: FormData) {
   await requireAuth();
   const which = String(formData.get("which"));
   if (which === "hotmart") await saveCheckoutSecrets({ hotmartHottok: "" });
   else if (which === "digistore") await saveCheckoutSecrets({ digistorePassphrase: "", digistoreApiKey: "" });
+  else if (which === "cooud") await saveCheckoutSecrets({ cooudWebhookSecret: "", cooudApiKey: "" });
+  else if (which === "cooud_key") await saveCheckoutSecrets({ cooudApiKey: "" });
   go("ok", "Configuração removida do painel.");
 }

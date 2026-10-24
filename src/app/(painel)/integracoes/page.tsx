@@ -15,7 +15,7 @@ import Help from "@/components/Help";
 import Acc from "@/components/Acc";
 import {
   addPixel, clearCheckout, connectDigistore, connectStripe, disconnectDigistore, deletePixel, disconnectStripe, newUniversalKey, saveDigistore,
-  saveHotmart, saveStripeManual, setAutoCapi, setDefaultPixel, updatePixelTestCode,
+  saveCooud, saveHotmart, saveStripeManual, setAutoCapi, setDefaultPixel, updatePixelTestCode,
 } from "./actions";
 
 export default async function Integracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
@@ -36,11 +36,12 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   const universalUrl = pub(`/api/webhooks/universal?key=${checkout.universalKey || "GERE_A_CHAVE"}&platform=kiwify`);
 
   const tz = env.timezone;
-  const [hStripe, hHotmart, hDigi, hUni] = await Promise.all([
+  const [hStripe, hHotmart, hDigi, hUni, hCooud] = await Promise.all([
     webhookHealth({ source: "stripe" }, !!checkout.stripeWebhookSecret),
     webhookHealth({ source: "hotmart" }, !!checkout.hotmartHottok),
     webhookHealth({ source: "digistore" }, true),
     webhookHealth({ kind: "universal" }, !!checkout.universalKey),
+    webhookHealth({ source: "cooud" }, !!checkout.cooudWebhookSecret),
   ]);
 
   // Digistore: confere na própria Digistore (se conectada pela chave de API) + o que chegou de verdade
@@ -138,6 +139,48 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
           </details>
           {checkout.stripeWebhookSecret && (
             <form action={disconnectStripe}><SubmitButton className="btn btn-sm btn-danger" confirm="Desconectar a Stripe e apagar o webhook criado pelo painel?">Desconectar</SubmitButton></form>
+          )}
+        </div>
+      ),
+    },
+    {
+      name: "Cooud",
+      url: pub("/api/webhooks/cooud"),
+      health: hCooud,
+      checks: genericChecks(
+        hCooud,
+        "Cooud",
+        "O segredo salvo não confere com o do webhook. Na Cooud o segredo só aparece na criação: crie um webhook novo com a URL acima e cole o whsec_ novo aqui.",
+        "O aviso chega na próxima venda. Confira na Cooud se o webhook tem a URL acima e o evento order.paid marcado.",
+      ),
+      status: checkout.cooudWebhookSecret ? `whsec ${tail(checkout.cooudWebhookSecret)}${checkout.cooudApiKey ? " · API ok" : ""}` : undefined,
+      steps: [
+        "Na Cooud: Store → Integrations → Webhooks → Novo webhook, cole a URL acima.",
+        "Marque os eventos order.paid e order.refunded (order.created também, se quiser ver Pix/boleto gerado como pendente).",
+        "A Cooud mostra o segredo (whsec_…) uma única vez: copie, cole abaixo e salve.",
+        "Opcional: a chave de API (Store → Integrations → Chaves da API v2 → Criar chave live) completa cada venda com e-mail, valor líquido e UTMs.",
+        "O t.js coloca o ID da visita e as UTMs no link do checkout da Cooud.",
+      ],
+      connect: (
+        <div className="space-y-3">
+          <form action={saveCooud} className="grid sm:grid-cols-2 gap-3">
+            <label className="field">
+              <span className="label">Segredo do webhook</span>
+              <input className="input mono" name="webhook_secret" placeholder={checkout.cooudWebhookSecret ? `salvo (${tail(checkout.cooudWebhookSecret)})` : "whsec_…"} required={!checkout.cooudWebhookSecret} autoComplete="off" />
+            </label>
+            <label className="field">
+              <span className="label">Chave de API (opcional)</span>
+              <input className="input mono" name="api_key" placeholder={checkout.cooudApiKey ? `salva (${tail(checkout.cooudApiKey)})` : "cooud_sk_live_…"} autoComplete="off" />
+            </label>
+            <div className="sm:col-span-2"><SubmitButton className="btn btn-primary" pendingText="Conferindo…">{checkout.cooudWebhookSecret ? "Salvar" : "Conectar Cooud"}</SubmitButton></div>
+          </form>
+          {checkout.cooudWebhookSecret && (
+            <div className="flex gap-2 flex-wrap">
+              {checkout.cooudApiKey && (
+                <form action={clearCheckout}><input type="hidden" name="which" value="cooud_key" /><SubmitButton className="btn btn-sm" confirm="Remover a chave de API da Cooud? O webhook continua funcionando.">Remover chave de API</SubmitButton></form>
+              )}
+              <form action={clearCheckout}><input type="hidden" name="which" value="cooud" /><SubmitButton className="btn btn-sm btn-danger" confirm="Desconectar a Cooud? As vendas param de chegar até você conectar de novo.">Desconectar</SubmitButton></form>
+            </div>
           )}
         </div>
       ),
