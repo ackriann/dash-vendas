@@ -24,7 +24,9 @@ export async function GET(req: Request) {
   if (!target) return Response.json({ error: "código inválido" }, { status: 404, headers: CORS });
   let q = rawDb().from("pixels").select("pixel_id").eq("workspace_id", target.workspaceId);
   if (target.pixelIds) q = q.in("id", target.pixelIds);
-  const { data } = await q.order("created_at");
+  const { data } = target.defaultOnly
+    ? await q.order("is_default", { ascending: false }).order("created_at").limit(1)
+    : await q.order("created_at");
   const pixels = [...new Set((data ?? []).map((p: any) => String(p.pixel_id)))];
   return Response.json(
     { account: target.workspaceId, pixels },

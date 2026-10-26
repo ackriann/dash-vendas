@@ -39,7 +39,7 @@ export default async function Dashes({ searchParams }: { searchParams: Promise<{
           <Acc
             key={d.id}
             title={d.name}
-            sub={`${d.products.length ? `${d.products.length} produto(s)` : "Todos os produtos"} · ${d.ad_account_ids.length ? `${d.ad_account_ids.length} conta(s) de anúncio` : "Todas as contas de anúncio"} · ${d.pixel_ids.length ? `${d.pixel_ids.length} pixel(s)` : "todos os pixels"}`}
+            sub={`${d.products.length ? `${d.products.length} produto(s)` : "Todos os produtos"} · ${d.ad_account_ids.length ? `${d.ad_account_ids.length} conta(s) de anúncio` : "Todas as contas de anúncio"} · ${d.pixel_ids.length ? `${d.pixel_ids.length} pixel(s)` : "pixel padrão"}`}
           >
             {pixels.length > 0 && (
               <div className="space-y-2 mb-4">
@@ -114,7 +114,7 @@ function DashForm({ dash, products, accounts, pixels }: { dash?: Dashboard; prod
       </fieldset>
 
       <fieldset className="space-y-2">
-        <legend className="label mb-1">Pixels (nenhum marcado = todos)</legend>
+        <legend className="label mb-1">Pixels (nenhum marcado = só o pixel padrão)</legend>
         {pixels.length ? (
           <div className="grid sm:grid-cols-2 gap-1.5">
             {pixels.map((p) => (

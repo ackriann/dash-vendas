@@ -38,10 +38,15 @@ export async function getActiveDashboard(): Promise<Dashboard | null> {
 
 // ------------------------------------------------------------ Código do pixel
 
-/** Pixels de um dash (null = conta inteira). Dash sem pixel marcado usa todos. */
-export function pixelsOfDash<T extends { id: string }>(all: T[], dash: Pick<Dashboard, "pixel_ids"> | null): T[] {
-  if (!dash?.pixel_ids.length) return all;
-  return all.filter((p) => dash.pixel_ids.includes(p.id));
+/**
+ * Pixels de um dash (null = conta inteira: todos).
+ * Dash sem pixel marcado usa só o pixel padrão: nada vai para um pixel que não foi escolhido.
+ */
+export function pixelsOfDash<T extends { id: string; is_default: boolean }>(all: T[], dash: Pick<Dashboard, "pixel_ids"> | null): T[] {
+  if (!dash) return all;
+  if (dash.pixel_ids.length) return all.filter((p) => dash.pixel_ids.includes(p.id));
+  const def = all.find((p) => p.is_default) ?? all[0];
+  return def ? [def] : [];
 }
 
 /**
@@ -54,6 +59,7 @@ export function pixelsForProduct<T extends { id: string; is_default: boolean }>(
     const def = all.find((p) => p.is_default) ?? all[0];
     return def ? [def] : [];
   }
+  // Cada dash do produto manda para os pixels dele (sem pixel marcado = só o padrão)
   const ids = new Set<string>();
   for (const d of matching) for (const p of pixelsOfDash(all, d)) ids.add(p.id);
   return all.filter((p) => ids.has(p.id));
