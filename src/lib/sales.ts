@@ -3,7 +3,8 @@ import { db, getSetting, logEvent } from "./db";
 import { toBase, fmtMoney, type FxRates } from "./money";
 import { metaIdsFromUtms, type Utms } from "./utm";
 import { pushAll } from "./push";
-import { getDefaultPixel, sendPurchase, type SaleRow } from "./capi";
+import { getPixels, sendPurchase, type SaleRow } from "./capi";
+import { listDashboards, pixelsForProduct } from "./dashboards";
 
 export type SaleStatus = "approved" | "pending" | "refunded" | "chargeback" | "canceled" | "refused";
 
@@ -184,12 +185,12 @@ async function afterStatusChange(sale: SaleRow, prev: SaleStatus | undefined, st
     await logEvent("push", status, false, e?.message ?? "erro no push");
   }
 
-  // Envio automático para o pixel (se ligado nas configurações)
+  // Envio automático (se ligado): pixels dos dashes do produto vendido, ou o pixel padrão
   if (status === "approved" && !sale.capi_sent_at) {
     const auto = await getSetting<boolean>("auto_capi", false);
     if (auto) {
-      const pixel = await getDefaultPixel();
-      if (pixel) await sendPurchase(sale, pixel);
+      const [pixels, dashes] = await Promise.all([getPixels(), listDashboards()]);
+      for (const pixel of pixelsForProduct(pixels, dashes, sale.product_name)) await sendPurchase(sale, pixel);
     }
   }
 }

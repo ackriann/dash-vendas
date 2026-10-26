@@ -4,8 +4,9 @@ import { env } from "@/lib/env";
 import { fmtDateTime } from "@/lib/dates";
 import { getPixels } from "@/lib/capi";
 import { getCheckoutSecrets } from "@/lib/checkouts";
-import { pixelSnippet } from "@/lib/utm";
 import { currentWorkspace, withWorkspace } from "@/lib/workspaces";
+import { listDashboards } from "@/lib/dashboards";
+import PixelCodes from "@/components/PixelCodes";
 import { ipnInfo, ipnUrl as digistoreIpnUrl, type IpnInfo } from "@/lib/digistore";
 import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
@@ -22,6 +23,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const ws = await currentWorkspace();
   const pub = (path: string) => withWorkspace(`${env.appUrl}${path}`, ws);
+  const dashes = await listDashboards();
   const [profiles, accounts, pixels, autoCapi, logs, checkout] = await Promise.all([
     db().from("meta_profiles").select("id"),
     db().from("ad_accounts").select("id", { count: "exact", head: true }).eq("enabled", true),
@@ -337,29 +339,33 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
             </ul>
           </Help>
         </div>
+        {pixels.length > 0 && (
+          <Acc
+            title="Código do pixel para o site"
+            sub={dashes.length ? "Um código por dash: carrega todos os pixels ligados ao dash" : "Um código só: carrega todos os pixels da conta"}
+            open
+            right={
+              <Help title="Onde colar o código">
+                <ol>
+                  <li>Copie o código do dash do produto (ou o da conta).</li>
+                  <li>Cole no &lt;head&gt; de <b>todas</b> as páginas: presell, vendas e obrigado.</li>
+                  <li><b>Tire o código antigo do pixel da Meta</b> dessas páginas (inclusive de plugin ou construtor de página), senão o PageView conta em dobro.</li>
+                  <li>Para trocar os pixels de um dash, edite em <b>Dashes</b>: o código no site continua o mesmo.</li>
+                </ol>
+              </Help>
+            }
+          >
+            <PixelCodes accountCode={ws.pixel_code} dashes={dashes} pixels={pixels} />
+          </Acc>
+        )}
         {pixels.map((p) => (
           <Acc
             key={p.id}
             title={p.name}
             sub={`ID ${p.pixel_id} · token …${p.access_token.slice(-6)}${p.test_event_code ? ` · teste ${p.test_event_code}` : ""}`}
             right={p.is_default ? <span className="pill pill-approved">padrão</span> : undefined}
-            open={pixels.length === 1}
           >
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <p className="text-sm font-semibold text-profit">Código do pixel para o site</p>
-                <Help title="Onde colar o código">
-                  <ol>
-                    <li>Copie o código.</li>
-                    <li>Cole no &lt;head&gt; de <b>todas</b> as páginas: presell, vendas e obrigado.</li>
-                    <li><b>Tire o código antigo do pixel da Meta</b> dessas páginas (inclusive de plugin ou construtor de página), senão o PageView conta em dobro.</li>
-                  </ol>
-                </Help>
-              </div>
-              <code className="codebox !text-[0.75rem]">{pixelSnippet(pub("/t.js"), [p.pixel_id])}</code>
-              <div className="mt-2"><CopyButton text={pixelSnippet(pub("/t.js"), [p.pixel_id])} label="Copiar código" /></div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
+            <div className="flex flex-wrap items-center gap-2">
               <form action={updatePixelTestCode} className="flex gap-1 items-center">
                 <input type="hidden" name="id" value={p.id} />
                 <input className="input !h-8 !w-32 text-sm" name="test_event_code" defaultValue={p.test_event_code ?? ""} placeholder="TEST1234" aria-label="Código de evento de teste" />
@@ -385,7 +391,7 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
         ))}
         <Acc
           title="Envio automático do Purchase"
-          sub="Toda venda aprovada vai para o pixel padrão pelo servidor"
+          sub={dashes.length ? "Venda aprovada vai pelo servidor para os pixels do dash do produto" : "Toda venda aprovada vai para o pixel padrão pelo servidor"}
           right={<span className={`pill ${autoCapi ? "pill-approved" : ""}`}>{autoCapi ? "Ligado" : "Desligado"}</span>}
         >
           <form action={setAutoCapi} className="flex items-center gap-3">

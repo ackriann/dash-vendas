@@ -9,7 +9,8 @@
  * 3. Adiciona o vid e as UTMs em todos os links de checkout da página:
  *    Hotmart (sck), Digistore24 (custom), Stripe (client_reference_id) e genérico (vid).
  *
- * 4. Com window.painelPixelId = "ID" (código gerado no painel) ou data-pixel="ID" (vários: "ID1,ID2"), também carrega o pixel da Meta — não precisa colar o
+ * 4. Com window.painelPixelId = "px_..." (código único do dash, gerado no painel: carrega todos os pixels
+ *    ligados ao dash) ou "ID" / data-pixel="ID1,ID2" (IDs dos pixels), também carrega o pixel da Meta — não precisa colar o
  *    código do pixel no site — e envia PageView, ViewContent e InitiateCheckout pelo navegador E pelo
  *    servidor (API de Conversões), com o mesmo event_id para a Meta deduplicar.
  *    O Purchase vai pelo servidor quando o checkout aprova a venda (webhook).
@@ -75,7 +76,17 @@
     // ------------------------------------------------------------ Pixel da Meta (data-pixel)
     var origin = new URL(script.src).origin;
     var rawPixels = script.getAttribute("data-pixel") || window.painelPixelId || "";
-    var pixels = (Array.isArray(rawPixels) ? rawPixels.join(",") : String(rawPixels)).split(",").map(function (s) { return s.replace(/\D/g, ""); }).filter(Boolean);
+    rawPixels = (Array.isArray(rawPixels) ? rawPixels.join(",") : String(rawPixels)).trim();
+    // Código único (px_...): o painel diz quais pixels do dash/conta carregar
+    var pixelCode = /^px_[a-z0-9]+$/i.test(rawPixels) ? rawPixels : null;
+    var pixels = pixelCode ? [] : rawPixels.split(",").map(function (s) { return s.replace(/\D/g, ""); }).filter(Boolean);
+    var ready = !pixelCode || !window.fetch ? { then: function (fn) { fn(); } } : fetch(origin + "/api/track/pixels?code=" + encodeURIComponent(pixelCode))
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (c) {
+        if (c.account && !account) { account = c.account; qs = "?a=" + encodeURIComponent(account); endpoint = origin + "/api/track" + qs; }
+        pixels = (c.pixels || []).map(function (s) { return String(s).replace(/\D/g, ""); }).filter(Boolean);
+      })
+      .catch(function () {});
     var offer = {};
     var dv = script.getAttribute("data-value");
     if (dv && !isNaN(Number(dv.replace(",", ".")))) offer.value = Number(dv.replace(",", "."));
@@ -99,7 +110,8 @@
       } catch (e) {}
     }
 
-    if (pixels.length) {
+    function bootPixels() {
+      if (!pixels.length) return;
       // _fbp criado na hora (mesmo formato da Meta), para o servidor já ter o navegador identificado
       if (!getCookie("_fbp")) setCookie("_fbp", "fb.1." + Date.now() + "." + Math.floor(Math.random() * 1e10));
       if (!window.fbq) {
@@ -118,6 +130,7 @@
       var initial = (script.getAttribute("data-events") || "PageView,ViewContent").split(",");
       for (var ei = 0; ei < initial.length; ei++) { var en = initial[ei].trim(); if (en) track(en); }
     }
+    ready.then(bootPixels);
     window.painelTrack = track;
 
     // InitiateCheckout uma vez por página, no clique do link/botão de checkout
@@ -138,7 +151,7 @@
       else fetch(endpoint, { method: "POST", body: body, headers: { "Content-Type": "application/json" }, keepalive: true });
     }
     // Espera o pixel criar o _fbp
-    setTimeout(send, 1500);
+    setTimeout(function () { ready.then(send); }, 1500);
 
     function isCheckout(url) {
       if (CHECKOUT_HOSTS.some(function (h) { return url.hostname === h || url.hostname.endsWith("." + h); })) return true;

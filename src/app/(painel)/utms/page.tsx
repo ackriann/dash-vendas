@@ -1,6 +1,9 @@
-import { publicUrl } from "@/lib/workspaces";
+import { currentWorkspace, publicUrl } from "@/lib/workspaces";
+import { env } from "@/lib/env";
+import { listDashboards } from "@/lib/dashboards";
+import PixelCodes from "@/components/PixelCodes";
 import Link from "next/link";
-import { RECOMMENDED_UTM, pixelSnippet } from "@/lib/utm";
+import { RECOMMENDED_UTM } from "@/lib/utm";
 import { getPixels } from "@/lib/capi";
 import CopyButton from "@/components/CopyButton";
 import UtmBuilder from "@/components/UtmBuilder";
@@ -9,11 +12,10 @@ import Acc from "@/components/Acc";
 
 export default async function Utms() {
   const tjs = await publicUrl("/t.js");
-  const pixels = await getPixels();
-  const main = pixels.filter((p) => p.is_default).concat(pixels.filter((p) => !p.is_default)).slice(0, 1);
-  const pixelAttr = main.length ? ` data-pixel="${main.map((p) => p.pixel_id).join(",")}"` : "";
-  const script = main.length ? pixelSnippet(tjs, main.map((p) => p.pixel_id)) : `<script src="${tjs}" async></script>`;
-  const scriptDomains = `<script src="${tjs}"${pixelAttr} data-domains="checkout.meusite.com" async></script>`;
+  const [pixels, dashes, ws] = await Promise.all([getPixels(), listDashboards(), currentWorkspace()]);
+  const main = pixels.slice(0, 1);
+  const scriptDomains = `<script src="${env.appUrl}/t.js" data-pixel="${ws.pixel_code}" data-domains="checkout.meusite.com" async></script>`;
+  const scriptOnlyUtm = `<script src="${tjs}" async></script>`;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -42,7 +44,7 @@ export default async function Utms() {
 
         <Acc
           title="2. Código do pixel na página"
-          sub={main.length ? `Pixel ${main[0].name} · carrega o pixel e rastreia as UTMs` : "Rastreia as UTMs (cadastre o pixel para incluir)"}
+          sub={main.length ? "Um código por dash · carrega os pixels do dash e rastreia as UTMs" : "Rastreia as UTMs (cadastre o pixel para incluir)"}
           open
           right={
             <Help title="Como usar o código">
@@ -61,11 +63,17 @@ export default async function Utms() {
               Cadastre o pixel em <Link className="underline" href="/integracoes">Integrações → Pixel</Link> para o código já sair com ele.
             </div>
           )}
-          <code className="codebox">{script}</code>
-          <div><CopyButton text={script} label="Copiar código" /></div>
+          {main.length ? (
+            <PixelCodes accountCode={ws.pixel_code} dashes={dashes} pixels={pixels} />
+          ) : (
+            <>
+              <code className="codebox">{scriptOnlyUtm}</code>
+              <div><CopyButton text={scriptOnlyUtm} label="Copiar código" /></div>
+            </>
+          )}
           <Acc title="Opções avançadas" sub="Vários pixels, valor da oferta, checkout em domínio próprio">
             <ul className="list-disc pl-5 space-y-1 text-sm text-muted">
-              <li><code>data-pixel=&quot;ID1,ID2&quot;</code> — mais de um pixel.</li>
+              <li>Os pixels de cada código são os marcados no dash (em <b>Dashes</b>). Mudou lá, muda no site sem trocar o código.</li>
               <li><code>data-value=&quot;197&quot; data-currency=&quot;BRL&quot; data-content-name=&quot;Curso X&quot;</code> — valor da oferta nos eventos.</li>
               <li><code>data-events=&quot;PageView&quot;</code> — eventos ao abrir a página (padrão: PageView,ViewContent). Use só PageView na presell.</li>
               <li><code>painelTrack(&quot;Lead&quot;)</code> — dispara outro evento, por exemplo no envio de um formulário.</li>

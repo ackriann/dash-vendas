@@ -12,7 +12,8 @@ function readForm(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim().slice(0, 40);
   const products = [...new Set(formData.getAll("product").map((p) => String(p).trim()).filter(Boolean))];
   const ad_account_ids = [...new Set(formData.getAll("ad_account").map(String).filter((a) => /^act_\d+$/.test(a)))];
-  return { name, products, ad_account_ids };
+  const pixel_ids = [...new Set(formData.getAll("pixel").map(String).filter((p) => /^[0-9a-f-]{36}$/i.test(p)))];
+  return { name, products, ad_account_ids, pixel_ids };
 }
 
 export async function createDashboard(formData: FormData) {

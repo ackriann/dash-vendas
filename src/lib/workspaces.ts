@@ -19,9 +19,11 @@ export interface Workspace {
   name: string | null;
   is_owner: boolean;
   created_at: string;
+  /** código público que carrega todos os pixels da conta */
+  pixel_code: string;
 }
 
-const COLS = "id,email,name,is_owner,created_at";
+const COLS = "id,email,name,is_owner,created_at,pixel_code";
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
