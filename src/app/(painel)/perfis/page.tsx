@@ -8,6 +8,7 @@ import SubmitButton from "@/components/SubmitButton";
 import CopyButton from "@/components/CopyButton";
 import Help from "@/components/Help";
 import Acc from "@/components/Acc";
+import ListSearch from "@/components/ListSearch";
 import { addProfile, checkProfile, removeProfile, renameProfile, replaceToken, saveAccounts, syncProfile } from "./actions";
 
 const TYPE_LABEL: Record<string, string> = { USER: "Usuário", SYSTEM_USER: "Usuário do sistema" };
@@ -88,9 +89,10 @@ export default async function Perfis({ searchParams }: { searchParams: Promise<{
               <form action={saveAccounts} className="space-y-3">
                 <input type="hidden" name="id" value={p.id} />
                 <p className="label !mb-0">Contas de anúncio — marque as que entram no painel</p>
+                <ListSearch placeholder="Pesquisar conta por nome ou ID…">
                 <ul className="divide-y divide-[#1f3a44] border border-line rounded-xl max-h-80 overflow-y-auto">
                   {list.map((a) => (
-                    <li key={a.id}>
+                    <li key={a.id} data-search={`${a.name} ${a.id}`}>
                       <label className="flex items-center gap-3 px-3 py-2.5 cursor-pointer">
                         <input type="checkbox" name="account" value={a.id} defaultChecked={a.enabled} />
                         <span className="flex-1 min-w-0">
@@ -102,6 +104,7 @@ export default async function Perfis({ searchParams }: { searchParams: Promise<{
                   ))}
                   {!list.length && <li className="px-3 py-3 sub">Nenhuma conta de anúncio neste perfil. Clique em Buscar contas.</li>}
                 </ul>
+                </ListSearch>
                 {list.length > 0 && <SubmitButton className="btn btn-primary" pendingText="Salvando…">Salvar contas</SubmitButton>}
               </form>
 

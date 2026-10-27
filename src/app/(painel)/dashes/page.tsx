@@ -5,6 +5,7 @@ import { listAccounts, type AccountRow } from "@/lib/profiles";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
 import Acc from "@/components/Acc";
+import ListSearch from "@/components/ListSearch";
 import CopyButton from "@/components/CopyButton";
 import { getPixels, type Pixel } from "@/lib/capi";
 import { pixelCodeSnippet } from "@/lib/pixel-code";
@@ -100,14 +101,16 @@ function DashForm({ dash, products, accounts, pixels }: { dash?: Dashboard; prod
       <fieldset className="space-y-2">
         <legend className="label mb-1">Contas de anúncio (nenhuma marcada = todas)</legend>
         {accounts.length ? (
-          <div className="grid sm:grid-cols-2 gap-1.5">
+          <ListSearch placeholder="Pesquisar conta por nome ou ID…">
+          <div className="grid sm:grid-cols-2 gap-1.5 max-h-80 overflow-y-auto">
             {accounts.map((a) => (
-              <label key={a.id} className="flex items-center gap-2 text-sm">
+              <label key={a.id} data-search={`${a.name} ${a.id}`} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="ad_account" value={a.id} defaultChecked={dash?.ad_account_ids.includes(a.id)} />
                 <span className="truncate">{a.name} <span className="text-muted">· {a.id.replace("act_", "")}</span></span>
               </label>
             ))}
           </div>
+          </ListSearch>
         ) : (
           <p className="text-sm text-muted">Ative as contas de anúncio em <Link className="underline" href="/perfis">Perfis Meta</Link> para escolher aqui.</p>
         )}
