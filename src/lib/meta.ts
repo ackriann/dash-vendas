@@ -155,16 +155,32 @@ export async function exchangeForLongToken(
 
 export const oauthRedirectUri = () => `${env.appUrl}/api/auth/facebook/callback`;
 
-/** Link do login com Facebook usando o app informado. */
-export function oauthUrl(appId: string, state: string): string {
+/**
+ * Permissões opcionais pedidas só quando um recurso precisa (autorização incremental):
+ * o perfil continua funcionando sem elas.
+ */
+export const OPTIONAL_SCOPES: Record<string, string> = {
+  catalog_management: "Catálogos (criar catálogos, produtos e atualizar mídias)",
+  instagram_basic: "Instagram ligado às Páginas (escolher o perfil do Instagram no anúncio)",
+};
+
+/** Link do login com Facebook usando o app informado (extra = permissões opcionais a pedir). */
+export function oauthUrl(appId: string, state: string, extra: string[] = []): string {
+  const scopes = [...META_SCOPES, ...extra.filter((s) => s in OPTIONAL_SCOPES && !META_SCOPES.includes(s))];
   const p = new URLSearchParams({
     client_id: appId,
     redirect_uri: oauthRedirectUri(),
     state,
-    scope: META_SCOPES.join(","),
+    scope: scopes.join(","),
     response_type: "code",
   });
+  if (extra.length) p.set("auth_type", "rerequest");
   return `https://www.facebook.com/${env.metaApiVersion}/dialog/oauth?${p}`;
+}
+
+/** Volta do login só para caminhos internos do painel (nada de redirecionar para fora). */
+export function safeOauthBack(v: string | null | undefined): string | null {
+  return v && /^\/(automacao|perfis)(\/[\w\-/]*)?$/.test(v) ? v : null;
 }
 
 /** Troca o código do login pelo token de usuário (depois validateToken troca pelo de 60 dias). */

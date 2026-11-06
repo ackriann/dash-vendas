@@ -45,6 +45,8 @@ export async function currentWorkspaceId(): Promise<string> {
 const SCOPED = new Set([
   "settings", "clicks", "sales", "fees", "pixels", "push_subscriptions", "events_log",
   "meta_profiles", "ad_accounts", "automation_rules", "dashboards",
+  // Automação de Campanhas
+  "auto_drafts", "ops_runs", "ops_jobs", "fb_pages", "media_assets", "catalog_schedules", "catalog_update_logs",
 ]);
 
 const withWorkspace = (row: unknown, ws: string) =>

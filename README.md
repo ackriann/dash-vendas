@@ -14,6 +14,7 @@ Seu painel pessoal no estilo Utmify: vendas de todas as plataformas, gasto da Me
 | **Vendas** | Lista com busca e filtros, detalhe da venda, **botão “Disparar venda no pixel”** (API de Conversões), **venda manual**, mudar status, excluir |
 | **Resumo** (filtros) | Por conta de anúncio, plataforma e produto · formas de pagamento com taxa de aprovação · origem (utm_source) · horários das vendas · reembolso e chargeback em % |
 | **Campanhas** | Contas, campanhas, conjuntos e anúncios com gasto × vendas reais × lucro · filtro por perfil/conta/status · busca · ordenar por qualquer coluna · **escolher colunas** (CPA, custo/IC, vis. página, conversões, CPC, CTR, CPM, hook, frequência, pendentes…) · **pausar/ativar**, **orçamento** e **duplicar** |
+| **Automação** | Módulo de criação e operação de campanhas usando os mesmos perfis Meta: **assistente em 4 etapas** (campanha → conjunto → criativos → revisão) com rascunho salvo, pixel/evento, público, regiões, interesses, posicionamentos, UTMs e prévia oficial da Meta · **catálogos** (produtos, mídias, status de revisão, atualizações programadas com histórico) · **biblioteca de mídias** · **FanPages** (permissões, contas relacionadas, limite de anúncios por Página, quais aparecem no criador) · **processos** em tempo real com fila persistente · **campanhas publicadas** (status, investimento, resultados, revisão/reprovação, pausar, orçamento, duplicar) |
 | **Regras** | Regras automáticas: “se Gastos > 100 e Vendas < 1 hoje → pausar”, “se ROAS ≥ 2 → +20% de orçamento”, com simulação, espera entre ações e aviso no celular |
 | **UTMs** | Parâmetros dos anúncios, script da página e gerador de link com UTM |
 | **Perfis Meta** | Vários perfis, cada um conectado por **App ID + chave secreta + token**; contas de anúncio ativadas por perfil; renovação automática do token |
@@ -35,6 +36,8 @@ Webhooks prontos: **Stripe, Hotmart, Digistore24** e um **universal** (Kiwify, P
 2. Vá em **SQL Editor → New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**.
 3. Em **Project Settings → API**, copie a **Project URL** e a chave **service_role** (secreta).
 
+> **Já usa o painel?** Rode também as migrações novas em `supabase/migrations/` (na ordem). A **005_automacao.sql** cria as tabelas da Automação de Campanhas, a fila (`ops_runs`/`ops_jobs` + função `ops_claim_job`) e o bucket público `automacao` do Storage para as mídias.
+
 ### 2. Chaves das notificações
 No seu computador, dentro da pasta do projeto:
 ```bash
@@ -53,6 +56,10 @@ Cada perfil é conectado em **Perfis Meta** de dois jeitos: botão **Entrar com 
    - **Usuário comum**: [Explorador da Graph API](https://developers.facebook.com/tools/explorer/) → escolha o app → adicione as permissões → Generate Access Token.
 4. Cole tudo em **Perfis Meta → Conectar perfil**. Repita para cada perfil/BM.
 5. Para o login com Facebook: adicione o produto **Login do Facebook** e cadastre em **URIs de redirecionamento OAuth válidos** `https://SEU-PAINEL.vercel.app/api/auth/facebook/callback`.
+
+Permissões opcionais (pedidas só quando você for usar, pelo botão “Autorizar” da Automação — autorização incremental): `catalog_management` (catálogos) e `instagram_basic` (escolher o Instagram da Página no anúncio).
+
+**Automação rodando sozinha:** as automações de catálogo e a fila usam o mesmo **Agendador** das Regras (`/api/cron/rules`). Cadastre a URL num cron a cada 5–15 minutos. Publicações de campanha não dependem do agendador: elas rodam logo ao publicar e pela tela de processamento.
 
 Permissões: `ads_read`, `ads_management`, `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_posts`, `pages_manage_metadata`, `pages_manage_engagement`.
 

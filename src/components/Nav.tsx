@@ -7,6 +7,7 @@ const ITEMS = [
   { href: "/dashes", label: "Dashes", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
   { href: "/vendas", label: "Vendas", icon: "M4 6h16M4 12h16M4 18h10" },
   { href: "/campanhas", label: "Campanhas", icon: "M4 15V9l12-5v16L4 15zm12-4h4" },
+  { href: "/automacao", label: "Automação", icon: "M4 6h10M4 12h7M4 18h10M17 4l3 3-3 3M14 15l3 3 3-3" },
   { href: "/regras", label: "Regras", icon: "M13 3L4 14h7l-1 7 9-11h-7l1-7z" },
   { href: "/utms", label: "UTMs", icon: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" },
   { href: "/paginas", label: "Páginas", icon: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3" },

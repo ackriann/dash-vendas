@@ -1,23 +1,24 @@
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
 import { logEvent } from "@/lib/db";
-import { exchangeCode } from "@/lib/meta";
+import { exchangeCode, safeOauthBack as safeBack } from "@/lib/meta";
 import { connectProfile, getProfile } from "@/lib/profiles";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const back = (msg: string, ok = false) =>
-    Response.redirect(`${env.appUrl}/perfis?${ok ? "ok" : "erro"}=${encodeURIComponent(msg)}`, 302);
-
   const store = await cookies();
-  let saved: { state?: string; profileId?: string | null } = {};
+  let saved: { state?: string; profileId?: string | null; voltar?: string | null } = {};
   try {
     saved = JSON.parse(store.get("fb_oauth_state")?.value ?? "{}");
   } catch {
     /* cookie inválido */
   }
+  const dest = safeBack(saved.voltar) ?? "/perfis";
+  const back = (msg: string, ok = false) =>
+    Response.redirect(`${env.appUrl}${dest}?${ok ? "ok" : "erro"}=${encodeURIComponent(msg)}`, 302);
+
   store.delete("fb_oauth_state");
 
   if (url.searchParams.get("error")) return back(url.searchParams.get("error_description") ?? "Login cancelado");

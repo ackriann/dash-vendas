@@ -3,10 +3,11 @@ import { getSetting, logEvent, runAsWorkspace } from "@/lib/db";
 import { runRules } from "@/lib/rules";
 import { listProfiles, refreshProfile } from "@/lib/profiles";
 import { listWorkspaces, workspaceFromUrl } from "@/lib/workspaces";
+import { automationTick } from "@/lib/automacao/engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function same(a: string, b: string): boolean {
   const x = Buffer.from(a);
@@ -15,7 +16,8 @@ function same(a: string, b: string): boolean {
 }
 
 /**
- * Roda as regras automáticas e renova os tokens dos perfis (1x por dia).
+ * Roda as regras automáticas, renova os tokens dos perfis (1x por dia) e
+ * processa a Automação de Campanhas (automações de catálogo e fila de operações).
  * - Chave gerada na tela de Regras (?key=...&a=conta): roda só aquela conta.
  * - CRON_SECRET da Vercel (Authorization: Bearer): roda todas as contas.
  */
@@ -56,12 +58,14 @@ async function runForWorkspace() {
     renewed.push(e?.message ?? "erro ao renovar tokens");
   }
 
+  const automacao = await automationTick(30_000);
+
   try {
     const results = await runRules();
-    return { ok: true, renewed, rules: results.map((r) => ({ rule: r.rule, result: r.message })) };
+    return { ok: true, renewed, automacao, rules: results.map((r) => ({ rule: r.rule, result: r.message })) };
   } catch (e: any) {
     await logEvent("regra", "cron", false, e?.message);
-    return { ok: false, renewed, error: e?.message as string };
+    return { ok: false, renewed, automacao, error: e?.message as string };
   }
 }
 

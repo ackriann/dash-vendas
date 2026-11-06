@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
-import { oauthUrl } from "@/lib/meta";
+import { OPTIONAL_SCOPES, oauthUrl, safeOauthBack as safeBack } from "@/lib/meta";
 import { getProfile } from "@/lib/profiles";
 
 export const runtime = "nodejs";
@@ -9,9 +9,14 @@ export const runtime = "nodejs";
  * Inicia o login com Facebook.
  * Sem ?perfil: cria um perfil novo com o app do servidor (META_APP_ID).
  * Com ?perfil=ID: reconecta aquele perfil usando o app dele.
+ * Com ?extra=catalog_management,...: pede também permissões opcionais (autorização incremental).
+ * Com ?voltar=/automacao/...: depois do login volta para essa tela.
  */
 export async function GET(req: Request) {
-  const profileId = new URL(req.url).searchParams.get("perfil");
+  const sp = new URL(req.url).searchParams;
+  const profileId = sp.get("perfil");
+  const extra = (sp.get("extra") ?? "").split(",").filter((s) => s in OPTIONAL_SCOPES);
+  const voltar = safeBack(sp.get("voltar"));
   let appId = env.metaAppId;
   if (profileId) {
     const p = await getProfile(profileId);
@@ -24,8 +29,9 @@ export async function GET(req: Request) {
     );
   }
   const state = crypto.randomUUID();
-  (await cookies()).set("fb_oauth_state", JSON.stringify({ state, profileId }), {
+  (await cookies()).set("fb_oauth_state", JSON.stringify({ state, profileId, voltar }), {
     httpOnly: true, secure: true, sameSite: "lax", maxAge: 600, path: "/",
   });
-  return Response.redirect(oauthUrl(appId, state), 302);
+  return Response.redirect(oauthUrl(appId, state, extra), 302);
 }
+
