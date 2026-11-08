@@ -589,7 +589,8 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
   const start = new Date(Date.now() + input.delayMinutes * 60000).toISOString();
   let made = 0;
   for (const v of input.videos) {
-    const name = `${d.campaign.name.trim()} · vídeo ${v.videoName}`.slice(0, 200);
+    // Inclui o processo e a mídia na chave para não confundir campanhas com nomes iguais.
+    const name = `Vídeo · ${ctx.run.id.slice(0, 8)} · ${v.videoId.slice(0, 8)} · ${v.videoName}`.slice(0, 200);
     const { data: exists } = await db().from("catalog_schedules").select("id").eq("catalog_id", catalogId).eq("name", name).maybeSingle();
     if (exists) continue;
     const { error } = await db().from("catalog_schedules").insert({
@@ -608,7 +609,7 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
     if (error) throw new Error(error.message);
     made++;
   }
-  return { status: "done", result: { start, schedules: made }, message: `Vídeo entra nos produtos em ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })}` };
+  return { status: "done", result: { start, schedules: made }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })} — processamento sujeito à Meta` };
 });
 
 onRunFinished("catalog_update", async (run) => {
@@ -617,8 +618,7 @@ onRunFinished("catalog_update", async (run) => {
   await db()
     .from("catalog_schedules")
     .update({ last_result: run.status === "done" ? "Concluída" : "Falhou — veja o processo" })
-    .eq("id", scheduleId)
-    .eq("active", true);
+    .eq("id", scheduleId);
 });
 
 export type { MediaAsset };
