@@ -612,12 +612,22 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
   return { status: "done", result: { start, schedules: made }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })} — processamento sujeito à Meta` };
 });
 
-onRunFinished("catalog_update", async (run) => {
+onRunFinished("catalog_update", async (run, jobs) => {
   const scheduleId = run.summary?.scheduleId as string | undefined;
   if (!scheduleId) return;
+  const check = jobs.find((job) => job.kind === "catalog_check");
+  const rejected = Number(check?.result?.rejected ?? 0);
+  const errors = Number(check?.result?.errors ?? 0);
+  const lastResult = run.status !== "done"
+    ? "Falhou — veja o processo"
+    : rejected > 0
+      ? `Meta reprovou ${rejected} produto(s) — veja o histórico`
+      : errors > 0
+        ? `Meta sinalizou erro em ${errors} produto(s) — veja o histórico`
+        : "Atualização enviada à Meta — confira o status de revisão";
   await db()
     .from("catalog_schedules")
-    .update({ last_result: run.status === "done" ? "Concluída" : "Falhou — veja o processo" })
+    .update({ last_result: lastResult })
     .eq("id", scheduleId);
 });
 
