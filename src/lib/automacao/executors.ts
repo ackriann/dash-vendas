@@ -5,7 +5,7 @@ import { MetaError, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
-  accountInfo, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
+  accountBusiness, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
   linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
 } from "./meta-ads";
 import { ensureOnAccount, getMedia, type MediaAsset } from "./media";
@@ -179,7 +179,7 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
         ...ig,
         template_data: {
           link: cr.url,
-          message: cr.message,
+          message: cr.message || undefined,
           name: cr.headline || "{{product.name}}",
           description: cr.description || "{{product.current_price}}",
           call_to_action: ctaOf(d, false),
@@ -197,7 +197,7 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
           video_data: {
             video_id: media.video_id,
             image_url: media.thumbnail_url,
-            message: cr.message,
+            message: cr.message || undefined,
             title: cr.headline || undefined,
             link_description: cr.description || undefined,
             call_to_action: ctaOf(d, true) ?? { type: "LEARN_MORE", value: { link: cr.url } },
@@ -207,7 +207,7 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
           link_data: {
             link: cr.url,
             image_hash: media.hash,
-            message: cr.message,
+            message: cr.message || undefined,
             name: cr.headline || undefined,
             description: cr.description || undefined,
             call_to_action: ctaOf(d, true),
@@ -464,9 +464,8 @@ export const AUTO_CATALOG_NAME = "Painel de Vendas · Catálogo automático";
 registerExecutor("catalog_auto", async (ctx) => {
   const d = draftOf(ctx);
   const auth = await authForAccount(d.accountId);
-  const info = await accountInfo(auth, d.accountId);
-  const bm = info.business;
-  if (!bm?.id) throw new MetaError("A conta de anúncio não está em um Business Manager; o catálogo automático precisa de um BM.");
+  const bm = await accountBusiness(auth, d.accountId);
+  if (!bm?.id) throw new MetaError("A conta de anúncio não está em nenhum Business Manager que o perfil conectado enxergue; o catálogo automático precisa de um BM.");
 
   const saved = await getSetting<Record<string, string>>("auto_catalogs", {});
   const list = await listBusinessCatalogs(auth, bm.id);

@@ -321,7 +321,6 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
     if (d.catalog.delayMinutes < 0) e[3].push("Tempo de atualização do vídeo inválido.");
   }
   if (!/^https?:\/\/\S+\.\S+/.test(cr.url)) e[3].push("Informe a URL de destino (com https://).");
-  if (!cr.message.trim()) e[3].push("Escreva o texto principal.");
   if (cr.message.length > 2200) e[3].push("Texto principal muito longo.");
   if (cr.urlTags && /[?#\s]/.test(cr.urlTags.replace(/\{\{[^}]+\}\}/g, ""))) e[3].push("Os parâmetros de URL não podem ter ?, # ou espaços.");
   return e;

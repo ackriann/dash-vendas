@@ -600,7 +600,7 @@ export default function Wizard({
             {catalog && !autoCat && <PreferVideo d={d} setK={setK} />}
 
             <label className="field">
-              <span className="label">Texto principal ({d.creative.message.length}/2200)</span>
+              <span className="label">Texto principal — opcional ({d.creative.message.length}/2200)</span>
               <textarea className="textarea" rows={5} value={d.creative.message} onChange={(e) => setCr({ message: e.target.value })} />
             </label>
             <div className="grid md:grid-cols-2 gap-3">

@@ -1,7 +1,7 @@
 import "server-only";
 import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile } from "../profiles";
-import { accountInfo, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
+import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
 import { getMediaMany, resolveCovers, type MediaAsset } from "./media";
 import { normalizeDraft, validateDraft, type DraftData } from "./types";
 import { createRun, kick, retryRun, tick, type JobSpec } from "./queue";
@@ -75,8 +75,8 @@ export async function checkBeforePublish(d: DraftData): Promise<string[]> {
       if (missing.length) errors.push(`Falta a imagem de capa de: ${missing.map((v) => v.name).join(", ")}. Abra a etapa Criativos para gerar.`);
     }
     if (autoCatalog && profile) {
-      const info = await accountInfo(authOf(profile), d.accountId).catch(() => null);
-      if (info && !info.business?.id) errors.push(`A conta ${acc.name} não está em um Business Manager; o catálogo automático precisa de um BM.`);
+      const bm = await accountBusiness(authOf(profile), d.accountId).catch(() => undefined);
+      if (bm === null) errors.push(`A conta ${acc.name} não está em nenhum Business Manager que o perfil conectado enxergue (nem como dona, nem como conta de cliente/parceiro); o catálogo automático precisa de um BM.`);
     }
   }
   return errors;
@@ -227,8 +227,7 @@ export async function checkAccount(d: DraftData, accountId: string, main: { curr
     c.errors.push(`Moeda ${c.currency} diferente da conta principal (${main.currency}): o orçamento seria lido em outra moeda.`);
   }
   const auth = await authForAccount(accountId);
-  const info = await accountInfo(auth, accountId);
-  c.business = info.business ?? null;
+  c.business = await accountBusiness(auth, accountId);
 
   if (d.adset.pixelId) {
     const pixels = await listAccountPixels(auth, accountId).catch(() => []);
@@ -260,7 +259,7 @@ export async function checkAccount(d: DraftData, accountId: string, main: { curr
     if (c.business) c.catalog = { status: "ok", note: `Catálogo automático do BM ${c.business.name}` };
     else {
       c.catalog = { status: "error", note: "Conta sem BM" };
-      c.errors.push("A conta não está em um Business Manager; o catálogo automático precisa de um BM.");
+      c.errors.push("A conta não está em nenhum Business Manager que o perfil enxergue; o catálogo automático precisa de um BM.");
     }
   }
   if (d.creative.mode === "catalog" && d.catalog.source === "existing" && d.campaign.catalogId) {
@@ -287,8 +286,8 @@ export async function checkAccount(d: DraftData, accountId: string, main: { curr
 /** Moeda e BM da conta principal, usados na conferência das contas extras. */
 export async function mainAccountRef(accountId: string) {
   const { data: acc } = await db().from("ad_accounts").select("currency").eq("id", accountId).maybeSingle();
-  const info = await accountInfo(await authForAccount(accountId), accountId).catch(() => null);
-  return { currency: acc?.currency ?? null, businessId: info?.business?.id ?? null, businessName: info?.business?.name ?? null };
+  const bm = await accountBusiness(await authForAccount(accountId), accountId).catch(() => null);
+  return { currency: acc?.currency ?? null, businessId: bm?.id ?? null, businessName: bm?.name ?? null };
 }
 
 /**

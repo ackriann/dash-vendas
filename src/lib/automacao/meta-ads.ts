@@ -62,11 +62,30 @@ export async function listBusinessCatalogs(auth: MetaAuth, businessId: string): 
   return [...owned, ...client].filter((c) => !seen.has(c.id) && seen.add(c.id)).map((c) => ({ ...c, business_id: businessId }));
 }
 
-/** Catálogos que a conta de anúncio pode usar (os do Business Manager dono da conta). */
-export async function listAccountCatalogs(auth: MetaAuth, act: string): Promise<Catalog[]> {
+/**
+ * BM em que a conta está: o dono dela ou, para conta pessoal, o BM que a tem como
+ * conta de cliente/parceiro (e que o perfil conectado enxerga).
+ */
+export async function accountBusiness(auth: MetaAuth, act: string): Promise<{ id: string; name: string } | null> {
   const info = await accountInfo(auth, act);
-  if (!info.business?.id) return [];
-  return listBusinessCatalogs(auth, info.business.id);
+  if (info.business?.id) return info.business;
+  const [agencies, mine] = await Promise.all([
+    graphAll<{ id: string; name: string }>(`${act}/agencies`, { fields: "id,name" }, auth, 2).catch(() => [] as { id: string; name: string }[]),
+    listBusinesses(auth).catch(() => [] as { id: string; name: string }[]),
+  ]);
+  const viaAgency = agencies.find((a) => mine.some((m) => m.id === a.id));
+  if (viaAgency) return viaAgency;
+  for (const b of mine.slice(0, 20)) {
+    const accs = await graphAll<{ id: string }>(`${b.id}/client_ad_accounts`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]);
+    if (accs.some((a) => a.id === act)) return b;
+  }
+  return null;
+}
+
+/** Catálogos que a conta de anúncio pode usar (os do BM em que ela está). */
+export async function listAccountCatalogs(auth: MetaAuth, act: string): Promise<Catalog[]> {
+  const bm = await accountBusiness(auth, act);
+  return bm ? listBusinessCatalogs(auth, bm.id) : [];
 }
 
 export async function createCatalog(auth: MetaAuth, businessId: string, name: string) {

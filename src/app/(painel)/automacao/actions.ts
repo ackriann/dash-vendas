@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
 import { db, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
-import { accountInfo, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
+import { accountBusiness, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
 import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, getDraft, publishDraft, retryRun, runDueSchedules } from "@/lib/automacao/engine";
 import { emptyDraft, normalizeDraft, type DraftData } from "@/lib/automacao/types";
@@ -175,9 +175,9 @@ export async function createCatalogForAccountAction(accountId: string, name: str
   if (!/^act_\d+$/.test(accountId)) return { error: "Escolha a conta de anúncio." };
   try {
     const auth = await authForAccount(accountId);
-    const info = await accountInfo(auth, accountId);
-    if (!info.business?.id) return { error: "Esta conta de anúncio não está em um Business Manager; catálogos só existem dentro de um BM." };
-    const { id } = await createCatalog(auth, info.business.id, name);
+    const bm = await accountBusiness(auth, accountId);
+    if (!bm) return { error: "Esta conta de anúncio não está em nenhum Business Manager que o perfil enxergue; catálogos só existem dentro de um BM." };
+    const { id } = await createCatalog(auth, bm.id, name);
     const { data: acc } = await db().from("ad_accounts").select("profile_id").eq("id", accountId).maybeSingle();
     return { id, name, profileId: acc?.profile_id ?? undefined };
   } catch (e: any) {
