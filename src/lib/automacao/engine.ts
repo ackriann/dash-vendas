@@ -134,7 +134,7 @@ export interface AutoProduct {
   mediaId: string;
 }
 
-/** Um produto por criativo (ou mais, se pedido): imagem = a imagem padrão do produto; vídeo no campo de vídeo. */
+/** Produtos com capa inicial. Sem agendamento, vídeos entram no catálogo na criação. */
 async function autoProducts(d: DraftData, draftId: string): Promise<{ products: AutoProduct[] }> {
   const media = await getMediaMany(d.creative.mediaIds);
   const productImage = await getMedia(d.catalog.productImageId);
@@ -164,8 +164,9 @@ async function autoProducts(d: DraftData, draftId: string): Promise<{ products: 
           link: d.creative.url,
           brand: (d.catalog.brand || page?.name || d.campaign.name).slice(0, 100),
           image_link: cover.public_url,
-          // Imagem e vídeo entram juntos na criação: a Meta revisa o produto completo
-          ...(m.kind === "video" ? { video: [{ url: m.public_url }] } : {}),
+          // Se houver atualização agendada, o vídeo só será associado ao produto no horário previsto.
+          // Qualquer mídia continua sujeita ao processamento e à revisão aplicáveis da Meta.
+          ...(m.kind === "video" && d.catalog.delayMinutes === 0 ? { video: [{ url: m.public_url }] } : {}),
         },
       });
     }
@@ -176,8 +177,26 @@ async function autoProducts(d: DraftData, draftId: string): Promise<{ products: 
 async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
   const jobs: JobSpec[] = [];
   const autoCatalog = d.creative.mode === "catalog" && d.catalog.source === "auto";
+  let videoSchedule: JobSpec | null = null;
   if (autoCatalog) {
     const { products } = await autoProducts(d, draftId);
+    if (d.catalog.delayMinutes > 0) {
+      const media = await getMediaMany(d.creative.mediaIds);
+      const videos = media.filter((m) => m.kind === "video").map((m) => ({
+        videoId: m.id,
+        videoName: m.name,
+        coverId: d.catalog.images?.[m.id] || d.catalog.productImageId,
+        retailerIds: products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId),
+      }));
+      if (videos.length) {
+        videoSchedule = {
+          key: "video_schedule",
+          kind: "catalog_video_schedule",
+          label: `Programar inclusão de vídeos em ${d.catalog.delayMinutes} minuto(s)`,
+          input: { delayMinutes: d.catalog.delayMinutes, videos },
+        };
+      }
+    }
     jobs.push(
       { key: "catalog", kind: "catalog_auto", label: "Catálogo do Business Manager (identifica ou cria)" },
       { key: "products", kind: "catalog_products", label: `Criação de ${products.length} produto(s) em lote`, input: { products } },
@@ -219,6 +238,9 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
     });
   }
+  // O prazo começa após a criação dos anúncios, não após a aprovação.
+  // O acompanhamento de revisão da Meta continua na operação seguinte.
+  if (videoSchedule) jobs.push(videoSchedule);
   jobs.push({ key: "review", kind: "review", label: "Publicação na Meta (revisão dos anúncios)" });
   return jobs;
 }
