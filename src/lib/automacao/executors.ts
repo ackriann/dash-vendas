@@ -6,7 +6,7 @@ import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
   accountBusiness, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
-  linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
+  instagramIdentity, linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
 } from "./meta-ads";
 import { ensureOnAccount, getMedia, type MediaAsset } from "./media";
 import { onRunFinished, registerExecutor, type ExecCtx, type Outcome } from "./queue";
@@ -234,7 +234,16 @@ registerExecutor("creative", async (ctx) => {
   if (mediaKey && !media) throw new Error("A mídia deste anúncio ainda não está pronta.");
   const setKey = ctx.job.input.productSetKey as string | undefined;
   if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
-  const spec = buildCreativeSpec(setKey ? { ...d, adset: { ...d.adset, productSetId: ctx.done[setKey].id } } : d, media);
+  let dd = setKey ? { ...d, adset: { ...d.adset, productSetId: ctx.done[setKey].id } } : d;
+  // Anúncio que pode sair no Instagram precisa de identidade lá: sem perfil escolhido, usa a da Página
+  const onInstagram = d.adset.placements === "auto" || d.adset.platforms.includes("instagram");
+  if (onInstagram && !d.creative.instagramId) {
+    const ig = await instagramIdentity(auth, d.creative.pageId).catch((e: any) => {
+      throw new MetaError(`O anúncio vai para o Instagram e a Página não tem identidade lá: ${e?.message ?? "sem permissão"}. Escolha um perfil do Instagram ou tire o Instagram dos posicionamentos.`);
+    });
+    if (ig) dd = { ...dd, creative: { ...dd.creative, instagramId: ig } };
+  }
+  const spec = buildCreativeSpec(dd, media);
   const r = await createIn<{ id: string }>(auth, `${d.accountId}/adcreatives`, { name: `${ctx.job.input.adName} · criativo`, ...spec });
   return { status: "done", metaId: r.id, result: { id: r.id }, message: `Criativo ${r.id}` };
 });

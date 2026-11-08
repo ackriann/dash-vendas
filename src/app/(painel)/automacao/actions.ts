@@ -6,7 +6,7 @@ import { db, getSetting, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
 import { accountBusiness, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
-import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, getDraft, publishDraft, retryRun, runDueSchedules } from "@/lib/automacao/engine";
+import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, fixAndContinue, getDraft, publishDraft, retryRun, runDueSchedules } from "@/lib/automacao/engine";
 import { emptyDraft, normalizeDraft, type DraftData } from "@/lib/automacao/types";
 
 function go(path: string, key: "ok" | "erro", msg: string): never {
@@ -107,6 +107,29 @@ export async function retryRunAction(formData: FormData) {
     go(`/automacao/processos/${id}`, "erro", e?.message ?? "Falha");
   }
   go(`/automacao/processos/${id}`, "ok", "Processo na fila de novo. O que já foi feito na Meta é mantido.");
+}
+
+/** "Corrigir e continuar" na tela do processo: ajusta Página, Instagram, link e textos e segue de onde parou. */
+export async function fixAndContinueAction(formData: FormData) {
+  await requireAuth();
+  const id = str(formData, "id");
+  const url = str(formData, "url");
+  if (url && !/^https?:\/\/\S+\.\S+/.test(url)) go(`/automacao/processos/${id}`, "erro", "URL de destino inválida (use https://).");
+  try {
+    await fixAndContinue(id, {
+      creative: {
+        pageId: str(formData, "page"),
+        instagramId: str(formData, "instagram"),
+        url,
+        message: String(formData.get("message") ?? ""),
+        headline: str(formData, "headline"),
+      },
+      adset: str(formData, "instagram_off") === "1" ? { placements: "manual", platforms: ["facebook"] } : {},
+    });
+  } catch (e: any) {
+    go(`/automacao/processos/${id}`, "erro", e?.message ?? "Falha");
+  }
+  go(`/automacao/processos/${id}`, "ok", "Corrigido. Continuando de onde parou — nada é criado em dobro.");
 }
 
 export async function cancelRunAction(formData: FormData) {

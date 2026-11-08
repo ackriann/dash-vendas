@@ -111,7 +111,7 @@ export default function RunProgress({ initial, back }: { initial: RunView; back?
         {back && <Link className="btn" href={back.href}>{back.label}</Link>}
       </div>
       {finished && run.status === "failed" && (
-        <p className="sub">Tentar de novo continua de onde parou: campanha, conjunto e mídias já criados são reaproveitados, nada é duplicado.</p>
+        <p className="sub">Tentar de novo continua de onde parou: campanha, conjunto e mídias já criados são reaproveitados, nada é duplicado.{run.kind === "publish" ? " Para ajustar algo antes, use “Corrigir e continuar aqui” logo abaixo." : ""}</p>
       )}
     </div>
   );

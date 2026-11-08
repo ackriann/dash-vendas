@@ -1,17 +1,61 @@
 import "server-only";
 import { db, logEvent } from "../db";
-import { authForAccount, authOf, getProfile } from "../profiles";
+import { authForAccount, authOf, getProfile, listAllPages } from "../profiles";
 import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
 import { getMedia, getMediaMany, type MediaAsset } from "./media";
-import { normalizeDraft, validateDraft, type DraftData } from "./types";
-import { createRun, kick, retryRun, tick, type JobSpec } from "./queue";
+import { normalizeDraft, validateDraft, type DraftData, type PageLite } from "./types";
+import { createRun, kick, retryRun as queueRetry, tick, type JobSpec } from "./queue";
 import "./executors"; // registra o que cada operação faz
 
-export { tick, kick, retryRun, cancelRun, getRunView, listRuns, jobCounts } from "./queue";
+export { tick, kick, cancelRun, getRunView, listRuns, jobCounts } from "./queue";
+
+/**
+ * Tentar de novo. Na publicação, o criativo cujo anúncio falhou é refeito
+ * (a correção pode estar nele: identidade do Instagram, texto, link…).
+ */
+export async function retryRun(runId: string) {
+  const { data: jobs } = await db().from("ops_jobs").select("id,key,status").eq("run_id", runId);
+  const ads = new Map((jobs ?? []).filter((j: any) => j.key.startsWith("ad:")).map((j: any) => [j.key.slice(3), j.status]));
+  const redo = (jobs ?? []).filter((j: any) => j.key.startsWith("creative:") && j.status === "done" && ads.get(j.key.slice(9)) !== "done").map((j: any) => j.id);
+  if (redo.length) await db().from("ops_jobs").update({ status: "pending", message: "Refazendo o criativo", meta_id: null }).in("id", redo);
+  await queueRetry(runId);
+}
+
+/** Corrige a configuração do processo de publicação (e do rascunho) e continua de onde parou. */
+export async function fixAndContinue(runId: string, patch: { creative?: Partial<DraftData["creative"]>; adset?: Partial<DraftData["adset"]> }) {
+  const { data: run } = await db().from("ops_runs").select("id,kind,ref_id,summary").eq("id", runId).maybeSingle();
+  if (!run || run.kind !== "publish") throw new Error("Processo de publicação não encontrado.");
+  const cur = normalizeDraft(run.summary?.draft);
+  const next: DraftData = { ...cur, creative: { ...cur.creative, ...(patch.creative ?? {}) }, adset: { ...cur.adset, ...(patch.adset ?? {}) } };
+  await db().from("ops_runs").update({ summary: { ...run.summary, draft: next } }).eq("id", runId);
+  if (run.ref_id) {
+    const draft = await getDraft(run.ref_id);
+    if (draft) {
+      const data = { ...draft.data, creative: { ...draft.data.creative, ...(patch.creative ?? {}) }, adset: { ...draft.data.adset, ...(patch.adset ?? {}) } };
+      await db().from("auto_drafts").update({ data, updated_at: new Date().toISOString() }).eq("id", run.ref_id);
+    }
+  }
+  await retryRun(runId);
+}
 
 // =====================================================================
 // Entrada da Automação de Campanhas: monta os processos e põe na fila.
 // =====================================================================
+
+/** Páginas do criador: as sincronizadas e liberadas em FanPages; sem sincronização, as das conexões. */
+export async function creatorPages(): Promise<{ pages: PageLite[]; fromSync: boolean }> {
+  const { data: synced } = await db().from("fb_pages").select("*").eq("enabled_in_creator", true).order("name");
+  const pages: PageLite[] = (synced ?? []).map((p: any) => ({
+    id: p.page_id, name: p.name, picture_url: p.picture_url, instagram_id: p.instagram_id, instagram_username: p.instagram_username,
+    ads_running: p.ads_running, ads_limit: p.ads_limit,
+  }));
+  if (pages.length) return { pages, fromSync: true };
+  const live = await listAllPages().catch(() => ({ pages: [] as any[], errors: [] }));
+  return {
+    pages: live.pages.map((p: any) => ({ id: p.id, name: p.name, picture_url: p.picture?.data?.url ?? null, instagram_id: null, instagram_username: null, ads_running: null, ads_limit: null })),
+    fromSync: false,
+  };
+}
 
 export interface DraftRow {
   id: string;

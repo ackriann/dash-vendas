@@ -538,7 +538,7 @@ export default function Wizard({
               <label className="field">
                 <span className="label">Instagram</span>
                 <select className="select" value={d.creative.instagramId} onChange={(e) => setCr({ instagramId: e.target.value })}>
-                  <option value="">Usar a Página (sem perfil do Instagram)</option>
+                  <option value="">Automático: Instagram ligado à Página ou a própria Página</option>
                   {page?.instagram_id && <option value={page.instagram_id}>@{page.instagram_username ?? page.instagram_id} (ligado à Página)</option>}
                   {look.instagram.filter((i) => i.id !== page?.instagram_id).map((i) => <option key={i.id} value={i.id}>@{i.username ?? i.id}</option>)}
                 </select>
@@ -657,7 +657,7 @@ export default function Wizard({
           ]} />
           <Summary title="Criativos" onEdit={() => setStep(3)} rows={[
             ["Página", page?.name ?? "—"],
-            ["Instagram", d.creative.instagramId ? (look.instagram.find((i) => i.id === d.creative.instagramId)?.username ?? page?.instagram_username ?? d.creative.instagramId) : "Usar a Página"],
+            ["Instagram", d.creative.instagramId ? (look.instagram.find((i) => i.id === d.creative.instagramId)?.username ?? page?.instagram_username ?? d.creative.instagramId) : "Automático (Instagram da Página)"],
             [catalog ? "Apresentação" : "Anúncios", catalog ? `${label(CATALOG_FORMATS, d.creative.catalogFormat)}${d.catalog.preferVideo ? " · priorizando vídeo" : ""}` : `${d.creative.mediaIds.length} (um por mídia)`],
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],

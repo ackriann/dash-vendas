@@ -1,5 +1,5 @@
 import "server-only";
-import { graph, graphAll, MetaError, type MetaAuth } from "../meta";
+import { graph, graphAll, MetaError, pageToken, type MetaAuth } from "../meta";
 
 // =====================================================================
 // Chamadas da Marketing API usadas pela Automação de Campanhas.
@@ -292,6 +292,21 @@ export interface AdsVolume {
 export async function adsVolume(auth: MetaAuth, act: string, pageId: string): Promise<AdsVolume | null> {
   const r = await graph<{ data?: AdsVolume[] }>(`${act}/ads_volume`, { params: { page_id: pageId }, auth });
   return r.data?.find((x) => !x.actor_id || x.actor_id === pageId) ?? r.data?.[0] ?? null;
+}
+
+/**
+ * Identidade do anúncio no Instagram quando não há perfil escolhido: o Instagram
+ * ligado à Página ou, se não houver, a conta "apoiada pela Página" (PBIA), que a
+ * Meta cria a partir da própria Página (doc "Set Up Instagram Accounts With Pages").
+ */
+export async function instagramIdentity(auth: MetaAuth, pageId: string): Promise<string | null> {
+  const page = await pageDetails(auth, pageId).catch(() => null);
+  if (page?.instagram_business_account?.id) return page.instagram_business_account.id;
+  const pAuth = await pageToken(auth, pageId);
+  const found = await graph<{ data?: { id: string }[] }>(`${pageId}/page_backed_instagram_accounts`, { params: { fields: "id" }, auth: pAuth });
+  if (found.data?.[0]?.id) return found.data[0].id;
+  const made = await graph<{ id: string }>(`${pageId}/page_backed_instagram_accounts`, { method: "POST", auth: pAuth });
+  return made.id ?? null;
 }
 
 export async function pageDetails(auth: MetaAuth, pageId: string) {

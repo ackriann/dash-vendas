@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRunView } from "@/lib/automacao/engine";
+import { creatorPages, getRunView } from "@/lib/automacao/engine";
+import { normalizeDraft } from "@/lib/automacao/types";
 import Notice from "@/components/Notice";
 import RunProgress from "./RunProgress";
+import FixPanel from "./FixPanel";
 
 type SP = Promise<{ ok?: string; erro?: string; de?: string; catalogo?: string; perfil?: string }>;
 
@@ -20,11 +22,18 @@ export default async function Processo({ params, searchParams }: { params: Promi
         ? { href: `/automacao/catalogos/${sp.catalogo ?? run.ref_id}${sp.perfil || run.summary?.profileId ? `?perfil=${sp.perfil ?? run.summary?.profileId}` : ""}`, label: "Voltar ao catálogo" }
         : null;
 
+  // Publicação que falhou: corrige aqui mesmo e continua
+  const fix =
+    run.kind === "publish" && run.status === "failed" && run.summary?.draft
+      ? { draft: normalizeDraft(run.summary.draft), pages: (await creatorPages()).pages, error: run.jobs.find((j) => j.status === "failed")?.error ?? null }
+      : null;
+
   return (
     <div className="space-y-4">
       <p className="text-sm"><Link className="text-muted hover:text-ink" href="/automacao/processos">← Processos</Link></p>
       <Notice ok={sp.ok} erro={sp.erro} />
       <RunProgress initial={run} back={back} />
+      {fix && <FixPanel runId={run.id} draftId={run.ref_id} draft={fix.draft} pages={fix.pages} error={fix.error} />}
     </div>
   );
 }
