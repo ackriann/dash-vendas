@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import MediaUploader from "@/components/automacao/MediaUploader";
 import {
-  BID_STRATEGIES, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
+  BID_STRATEGIES, CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
   RECOMMENDED_URL_TAGS, STEP_LABELS, needsBidAmount, validateDraft,
   type AccountLite, type CatalogAuto, type CatalogPrefs, type DraftData, type MediaLite, type Named, type PageLite, type Region,
 } from "@/lib/automacao/types";
@@ -618,6 +618,13 @@ export default function Wizard({
               </label>
               <label className="field"><span className="label">URL de destino</span><input className="input" type="url" value={d.creative.url} onChange={(e) => setCr({ url: e.target.value.trim() })} placeholder="https://" /></label>
             </div>
+            {catalog && (
+              <p className="text-xs text-muted">
+                Nome e preço são dados obrigatórios do catálogo, mas não serão inseridos automaticamente no título ou na descrição do anúncio.
+                Se você deixar esses textos vazios, o painel usará “{CATALOG_DEFAULT_HEADLINE}” e “{CATALOG_DEFAULT_DESCRIPTION}”.
+                A Meta ainda pode apresentar dados do produto em cartões, etiquetas e posicionamentos próprios.
+              </p>
+            )}
             <label className="field">
               <span className="label flex items-center justify-between gap-2">Parâmetros de URL (UTMs)
                 <button type="button" className="text-info text-xs" onClick={() => setCr({ urlTags: RECOMMENDED_URL_TAGS })}>Usar padrão do painel</button>
@@ -1206,8 +1213,8 @@ function Preview({ d, page, media }: { d: DraftData; page?: PageLite; media: Med
         <div className="ap-foot">
           <div className="min-w-0">
             <div style={{ fontSize: 12, color: "#65676b" }}>{host}</div>
-            <div style={{ fontWeight: 600 }} className="truncate">{d.creative.headline || (catalog ? "{{product.name}}" : "Título")}</div>
-            {d.creative.description && <div style={{ fontSize: 13, color: "#65676b" }} className="truncate">{d.creative.description}</div>}
+            <div style={{ fontWeight: 600 }} className="truncate">{d.creative.headline || (catalog ? CATALOG_DEFAULT_HEADLINE : "Título")}</div>
+            {(d.creative.description || catalog) && <div style={{ fontSize: 13, color: "#65676b" }} className="truncate">{d.creative.description || CATALOG_DEFAULT_DESCRIPTION}</div>}
           </div>
           {d.creative.cta !== "NO_BUTTON" && <span className="ap-cta">{label(CTAS, d.creative.cta)}</span>}
         </div>
