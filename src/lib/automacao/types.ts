@@ -135,6 +135,8 @@ export interface CatalogAuto {
   brand: string;
   /** imagem do produto (biblioteca), salva como padrão: vai em todos os produtos; os vídeos entram no campo de vídeo */
   productImageId: string;
+  /** imagem de cada criativo de vídeo (id do vídeo → id da imagem); sem escolha = productImageId */
+  images: Record<string, string>;
   /** single = um anúncio com todos os produtos · per_creative = um anúncio por criativo, no mesmo conjunto */
   adsMode: "single" | "per_creative";
   /** mídia dinâmica da Meta: mostra o vídeo do produto quando houver */
@@ -263,7 +265,7 @@ export function emptyDraft(accountId = ""): DraftData {
       catalogFormat: "carousel_images_multi_items",
       adName: "{midia}",
     },
-    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", adsMode: "single", preferVideo: true },
+    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", images: {}, adsMode: "single", preferVideo: true },
   };
 }
 
@@ -321,7 +323,6 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
     if (!d.catalog.productImageId) e[3].push("Escolha a imagem do produto (fica salva como padrão para os próximos catálogos).");
     if (!(Number(d.catalog.price) > 0)) e[3].push("Informe o preço dos produtos (em Configurações avançadas do catálogo).");
     if (!(d.catalog.productsPerCreative >= 1 && d.catalog.productsPerCreative <= 10)) e[3].push("Produtos por criativo: de 1 a 10.");
-    if (d.catalog.delayMinutes < 0) e[3].push("Tempo de atualização do vídeo inválido.");
   }
   if (!/^https?:\/\/\S+\.\S+/.test(cr.url)) e[3].push("Informe a URL de destino (com https://).");
   if (cr.message.length > 2200) e[3].push("Texto principal muito longo.");

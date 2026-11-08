@@ -2,7 +2,7 @@ import "server-only";
 import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile, listAllPages } from "../profiles";
 import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
-import { getMedia, getMediaMany, type MediaAsset } from "./media";
+import { getMedia, getMediaMany } from "./media";
 import { normalizeDraft, validateDraft, type DraftData, type PageLite } from "./types";
 import { createRun, kick, retryRun as queueRetry, tick, type JobSpec } from "./queue";
 import "./executors"; // registra o que cada operação faz
@@ -113,8 +113,11 @@ export async function checkBeforePublish(d: DraftData): Promise<string[]> {
     if (media.length !== d.creative.mediaIds.length) errors.push("Alguma mídia escolhida foi excluída da biblioteca.");
     if (media.some((m) => m.status !== "ready")) errors.push("Alguma mídia ainda não terminou de enviar.");
     if (autoCatalog) {
-      const img = await getMedia(d.catalog.productImageId);
-      if (!img || img.kind !== "image" || img.status !== "ready") errors.push("A imagem do produto não está na biblioteca (foi excluída?). Escolha outra na etapa Criativos.");
+      const ids = [d.catalog.productImageId, ...Object.values(d.catalog.images ?? {})].filter(Boolean);
+      const imgs = await getMediaMany([...new Set(ids)]);
+      if (!imgs.some((m) => m.id === d.catalog.productImageId) || imgs.some((m) => m.kind !== "image" || m.status !== "ready") || imgs.length !== new Set(ids).size) {
+        errors.push("Alguma imagem dos produtos não está na biblioteca (foi excluída?). Confira na etapa Criativos.");
+      }
     }
     if (autoCatalog && profile) {
       const bm = await accountBusiness(authOf(profile), d.accountId).catch(() => undefined);
@@ -132,25 +135,22 @@ export interface AutoProduct {
 }
 
 /** Um produto por criativo (ou mais, se pedido): imagem = a imagem padrão do produto; vídeo no campo de vídeo. */
-async function autoProducts(d: DraftData, draftId: string): Promise<{ products: AutoProduct[]; videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] }> {
+async function autoProducts(d: DraftData, draftId: string): Promise<{ products: AutoProduct[] }> {
   const media = await getMediaMany(d.creative.mediaIds);
   const productImage = await getMedia(d.catalog.productImageId);
   if (!productImage) throw new Error("Imagem do produto não encontrada na biblioteca.");
+  const perCreative = await getMediaMany([...new Set(Object.values(d.catalog.images ?? {}))]);
   const { data: acc } = await db().from("ad_accounts").select("currency").eq("id", d.accountId).maybeSingle();
   const { data: page } = await db().from("fb_pages").select("name").eq("page_id", d.creative.pageId).maybeSingle();
   const currency = acc?.currency ?? "BRL";
   const title = (d.creative.headline || d.campaign.name).slice(0, 150);
   const per = Math.min(10, Math.max(1, Math.round(d.catalog.productsPerCreative || 1)));
-  const delayed = d.catalog.delayMinutes > 0;
   const products: AutoProduct[] = [];
-  const videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] = [];
   for (const m of media) {
-    const cover = m.kind === "video" ? productImage : m;
-    const ids: string[] = [];
+    const cover = m.kind === "video" ? perCreative.find((x) => x.id === d.catalog.images?.[m.id]) ?? productImage : m;
     for (let n = 1; n <= per; n++) {
       // ID estável: publicar de novo atualiza o mesmo produto em vez de duplicar
       const retailerId = `pv_${draftId.slice(0, 8)}_${m.id.slice(0, 8)}_${n}`;
-      ids.push(retailerId);
       products.push({
         retailerId,
         mediaId: m.id,
@@ -164,22 +164,20 @@ async function autoProducts(d: DraftData, draftId: string): Promise<{ products: 
           link: d.creative.url,
           brand: (d.catalog.brand || page?.name || d.campaign.name).slice(0, 100),
           image_link: cover.public_url,
-          ...(m.kind === "video" && !delayed ? { video: [{ url: m.public_url }] } : {}),
+          // Imagem e vídeo entram juntos na criação: a Meta revisa o produto completo
+          ...(m.kind === "video" ? { video: [{ url: m.public_url }] } : {}),
         },
       });
     }
-    if (m.kind === "video" && delayed) videos.push({ video: m, cover, retailerIds: ids });
   }
-  return { products, videos };
+  return { products };
 }
 
 async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
   const jobs: JobSpec[] = [];
   const autoCatalog = d.creative.mode === "catalog" && d.catalog.source === "auto";
-  let delayedVideos: Awaited<ReturnType<typeof autoProducts>>["videos"] = [];
   if (autoCatalog) {
-    const { products, videos } = await autoProducts(d, draftId);
-    delayedVideos = videos;
+    const { products } = await autoProducts(d, draftId);
     jobs.push(
       { key: "catalog", kind: "catalog_auto", label: "Catálogo do Business Manager (identifica ou cria)" },
       { key: "products", kind: "catalog_products", label: `Criação de ${products.length} produto(s) em lote`, input: { products } },
@@ -219,17 +217,6 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       const adName = adNameFor(d.creative.adName, n, m.name, media.length);
       jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo · ${adName}`, input: { adName, mediaKey: `media:${m.id}` } });
       jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
-    });
-  }
-  if (delayedVideos.length) {
-    jobs.push({
-      key: "video_schedule",
-      kind: "catalog_video_schedule",
-      label: `Agendamento do vídeo nos produtos (em ${d.catalog.delayMinutes} min)`,
-      input: {
-        delayMinutes: d.catalog.delayMinutes,
-        videos: delayedVideos.map((v) => ({ videoId: v.video.id, videoName: v.video.name, coverId: v.cover.id, retailerIds: v.retailerIds })),
-      },
     });
   }
   jobs.push({ key: "review", kind: "review", label: "Publicação na Meta (revisão dos anúncios)" });

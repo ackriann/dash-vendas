@@ -66,8 +66,8 @@ export async function publishDraftAction(id: string, data: DraftData): Promise<{
     const r = await publishDraft(id);
     if (r.errors?.length) return { errors: r.errors };
     if (data.creative.mode === "catalog" && data.catalog.source === "auto") {
-      const { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo, productImageId } = data.catalog;
-      await setSetting("catalog_prefs", { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo, productImageId, catalogFormat: data.creative.catalogFormat }).catch(() => {});
+      const { productsPerCreative, price, brand, adsMode, preferVideo, productImageId } = data.catalog;
+      await setSetting("catalog_prefs", { productsPerCreative, price, brand, adsMode, preferVideo, productImageId, catalogFormat: data.creative.catalogFormat }).catch(() => {});
     }
     revalidatePath("/automacao");
     return { runId: r.runId, runIds: r.runIds };

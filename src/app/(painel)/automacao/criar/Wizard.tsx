@@ -90,7 +90,9 @@ export default function Wizard({
   const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({});
   const chosenMedia = d.creative.mediaIds.map((id) => media.find((m) => m.id === id)).filter(Boolean) as MediaLite[];
   const productImage = media.find((m) => m.id === d.catalog.productImageId && m.kind === "image");
-  const productImages = autoCat ? [productImage, ...chosenMedia.filter((m) => m.kind === "image")].filter(Boolean) as MediaLite[] : [];
+  const productImages = autoCat
+    ? [productImage, ...chosenMedia.filter((m) => m.kind === "image"), ...Object.values(d.catalog.images ?? {}).map((id) => media.find((m) => m.id === id))].filter(Boolean) as MediaLite[]
+    : [];
   useEffect(() => {
     for (const m of productImages) {
       if (dims[m.id]) continue;
@@ -184,7 +186,7 @@ export default function Wizard({
     if (mode === "catalog") {
       changeObjective("OUTCOME_SALES");
       // Preferências da última campanha de catálogo
-      const { catalogFormat, ...prefs } = catalogPrefs;
+      const { catalogFormat, delayMinutes: _old, ...prefs } = catalogPrefs;
       setD((x) => (x.catalog.price === null
         ? { ...x, catalog: { ...x.catalog, ...prefs }, creative: { ...x.creative, catalogFormat: catalogFormat ?? x.creative.catalogFormat } }
         : !x.catalog.productImageId && prefs.productImageId ? { ...x, catalog: { ...x.catalog, productImageId: prefs.productImageId } } : x));
@@ -662,7 +664,6 @@ export default function Wizard({
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
               ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, no mesmo conjunto)` : "1 com todos os produtos"] as [string, string],
-              ["Vídeo nos produtos", chosenMedia.some((m) => m.kind === "video") ? (d.catalog.delayMinutes > 0 ? `${d.catalog.delayMinutes} min depois da publicação` : "Já na criação") : "—"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
             ["UTMs", d.creative.urlTags || "—"],
@@ -683,7 +684,6 @@ export default function Wizard({
               {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
               <li>Criação de {catalog ? (autoCat && d.catalog.adsMode === "per_creative" ? d.creative.mediaIds.length : 1) : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
-              {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento: o vídeo entra nos produtos {d.catalog.delayMinutes} min depois (a atualização passa pela revisão da Meta).</li>}
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
             <p className="text-xs text-muted">Cada etapa aparece na tela de processamento. Se cair a conexão ou você recarregar, nada é criado em dobro.</p>
@@ -964,11 +964,35 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
         )}
       </div>
 
-      <p className="text-xs text-muted">
-        {chosen.length
-          ? `${chosen.length} criativo(s) escolhido(s) acima: cada um vira ${d.catalog.productsPerCreative > 1 ? `${d.catalog.productsPerCreative} produtos` : "um produto"} com a imagem acima${hasVideo ? " e o vídeo" : ""}.`
-          : "Escolha os vídeos acima: cada um vira um produto com a imagem padrão e o vídeo."}
-      </p>
+      {chosen.some((m) => m.kind === "video") ? (
+        <div className="grid gap-1.5">
+          <span className="text-sm font-semibold">Imagem de cada criativo <span className="text-xs text-muted font-normal">(o produto nasce com a imagem e o vídeo juntos)</span></span>
+          <ul className="grid gap-1.5">
+            {chosen.filter((m) => m.kind === "video").map((v) => {
+              const own = images.find((i) => i.id === d.catalog.images?.[v.id]);
+              const shown = own ?? productImage;
+              return (
+                <li key={v.id} className="flex items-center gap-3">
+                  <span className="w-10 h-10 rounded-md overflow-hidden bg-surface-2 shrink-0">{shown && <img src={shown.public_url} alt="" className="w-full h-full object-cover" />}</span>
+                  <span className="flex-1 min-w-0 text-sm truncate">{v.name}</span>
+                  <select className="select !h-8 !w-48 text-xs" value={own?.id ?? ""} aria-label={`Imagem do produto de ${v.name}`}
+                    onChange={(e) => {
+                      const next = { ...(d.catalog.images ?? {}) };
+                      if (e.target.value) next[v.id] = e.target.value;
+                      else delete next[v.id];
+                      setK({ images: next });
+                    }}>
+                    <option value="">Imagem padrão</option>
+                    {images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  </select>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">Escolha os criativos acima: cada um vira {d.catalog.productsPerCreative > 1 ? `${d.catalog.productsPerCreative} produtos` : "um produto"}.</p>
+      )}
 
       <div>
         <span className="label">Anúncios no conjunto</span>
@@ -992,25 +1016,6 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           <input className="input num" type="number" min={1} max={10} value={d.catalog.productsPerCreative}
             onChange={(e) => setK({ productsPerCreative: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} />
         </label>
-        {hasVideo && (
-          <div className="field">
-            <span className="label">Vídeo nos produtos</span>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={d.catalog.delayMinutes > 0} onChange={(e) => setK({ delayMinutes: e.target.checked ? 60 : 0 })} />
-                Atualizar depois de
-              </label>
-              <input className="input num !w-20" type="number" min={15} step={5} disabled={!(d.catalog.delayMinutes > 0)} value={d.catalog.delayMinutes || 60}
-                onChange={(e) => setK({ delayMinutes: Math.max(15, Number(e.target.value) || 15) })} aria-label="Minutos até o vídeo entrar nos produtos" />
-              <span className="text-sm text-muted">min</span>
-            </div>
-            <span className="text-xs text-muted">
-              {d.catalog.delayMinutes > 0
-                ? "Os produtos começam com a imagem inicial; o vídeo entra no horário marcado (a alteração passa pela revisão da Meta)."
-                : "Desligado: o vídeo já entra nos produtos na criação."}
-            </span>
-          </div>
-        )}
       </div>
 
       <details open={advancedOpen}>
