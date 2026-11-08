@@ -123,6 +123,8 @@ export interface Region { key: string; name: string; country?: string }
 
 export interface DraftData {
   accountId: string;
+  /** Outras contas que recebem a mesma campanha (cada uma vira um processo de publicação) */
+  extraAccountIds: string[];
   campaign: {
     name: string;
     objective: Objective;
@@ -183,6 +185,7 @@ export const RECOMMENDED_URL_TAGS =
 export function emptyDraft(accountId = ""): DraftData {
   return {
     accountId,
+    extraAccountIds: [],
     campaign: {
       name: "",
       objective: "OUTCOME_SALES",
@@ -242,6 +245,7 @@ export function normalizeDraft(raw: unknown, accountId = ""): DraftData {
   const r = (raw ?? {}) as Partial<DraftData>;
   return {
     accountId: r.accountId ?? d.accountId,
+    extraAccountIds: (r.extraAccountIds ?? []).filter((a) => a && a !== (r.accountId ?? d.accountId)),
     campaign: { ...d.campaign, ...(r.campaign ?? {}) },
     adset: { ...d.adset, ...(r.adset ?? {}) },
     creative: { ...d.creative, ...(r.creative ?? {}) },

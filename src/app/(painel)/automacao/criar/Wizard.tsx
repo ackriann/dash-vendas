@@ -8,7 +8,7 @@ import {
   RECOMMENDED_URL_TAGS, STEP_LABELS, needsBidAmount, validateDraft,
   type AccountLite, type DraftData, type MediaLite, type Named, type PageLite, type Region,
 } from "@/lib/automacao/types";
-import { publishDraftAction, saveDraftAction } from "../actions";
+import { createCatalogForAccountAction, publishDraftAction, saveDraftAction } from "../actions";
 
 type Lookups = {
   pixels: { id: string; name: string; last_fired_time?: string }[];
@@ -17,6 +17,14 @@ type Lookups = {
   audiences: { id: string; name: string; approximate_count_lower_bound?: number }[];
 };
 const EMPTY: Lookups = { pixels: [], catalogs: [], instagram: [], audiences: [] };
+
+type Status = "none" | "ok" | "share" | "own" | "error";
+type AccountCheck = {
+  accountId: string; name: string; currency: string | null; business: { id: string; name: string } | null;
+  pixel: { status: Status; id: string; note: string }; catalog: { status: Status; note: string }; audiences: { status: Status; note: string };
+  errors: string[];
+};
+type Checks = { loading: boolean; error?: string; main?: { businessId: string | null; businessName: string | null }; list: AccountCheck[] };
 
 const COUNTRIES: [string, string][] = [
   ["BR", "Brasil"], ["PT", "Portugal"], ["US", "Estados Unidos"], ["MX", "México"], ["AR", "Argentina"], ["CO", "Colômbia"],
@@ -58,11 +66,12 @@ export default function Wizard({
   const [look, setLook] = useState<Lookups>(EMPTY);
   const [lookErr, setLookErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sets, setSets] = useState<{ id: string; name: string; product_count?: number }[]>([]);
+  const [sets, setSets] = useState<{ id: string; name: string; product_count?: number }[] | null>([]);
   const [media, setMedia] = useState(initialMedia);
   const [publishing, setPublishing] = useState(false);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const first = useRef(true);
+  const [checks, setChecks] = useState<Checks>({ loading: false, list: [] });
 
   const errors = useMemo(() => validateDraft(d), [d]);
   const account = accounts.find((a) => a.id === d.accountId);
@@ -113,8 +122,25 @@ export default function Wizard({
 
   useEffect(() => {
     if (!d.accountId || !d.campaign.catalogId) { setSets([]); return; }
-    api<typeof sets>("productsets", d.accountId, { catalog: d.campaign.catalogId }).then(setSets).catch(() => setSets([]));
+    setSets(null);
+    api<NonNullable<typeof sets>>("productsets", d.accountId, { catalog: d.campaign.catalogId }).then(setSets).catch(() => setSets([]));
   }, [d.accountId, d.campaign.catalogId]);
+
+  // Conferência das contas extras (BM, pixel, catálogo, públicos, moeda)
+  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id)]);
+  useEffect(() => {
+    if (!d.accountId || !d.extraAccountIds.length) { setChecks({ loading: false, list: [] }); return; }
+    let alive = true;
+    setChecks((c) => ({ ...c, loading: true, error: undefined }));
+    const t = setTimeout(() => {
+      fetch("/api/automacao/contas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: d }) })
+        .then((r) => r.json())
+        .then((j) => alive && setChecks(j.error ? { loading: false, error: j.error, list: [] } : { loading: false, main: j.data.main, list: j.data.checks }))
+        .catch((e) => alive && setChecks({ loading: false, error: String(e?.message ?? e), list: [] }));
+    }, 700);
+    return () => { alive = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkKey]);
 
   // Pixel padrão: o único da conta
   useEffect(() => {
@@ -136,9 +162,9 @@ export default function Wizard({
   async function publish() {
     setPublishing(true);
     setServerErrors([]);
-    const r: { runId?: string; errors?: string[] } = await publishDraftAction(draftId, d).catch((e) => ({ errors: [String(e?.message ?? e)] }));
+    const r: { runId?: string; runIds?: string[]; errors?: string[] } = await publishDraftAction(draftId, d).catch((e) => ({ errors: [String(e?.message ?? e)] }));
     if (r.runId) {
-      router.push(`/automacao/processos/${r.runId}`);
+      router.push((r.runIds?.length ?? 1) > 1 ? "/automacao/processos" : `/automacao/processos/${r.runId}`);
       return;
     }
     setServerErrors(r.errors ?? ["Falha ao publicar."]);
@@ -146,7 +172,8 @@ export default function Wizard({
   }
 
   const stepState = (n: 1 | 2 | 3) => (errors[n].length ? "err" : "ok");
-  const allErrors = [...errors[1], ...errors[2], ...errors[3]];
+  const checkErrors = checks.list.flatMap((c) => c.errors.map((e) => `${c.name}: ${e}`));
+  const allErrors = [...errors[1], ...errors[2], ...errors[3], ...checkErrors];
 
   return (
     <div className="space-y-5">
@@ -179,8 +206,8 @@ export default function Wizard({
           <h2>Campanha</h2>
           <div className="grid md:grid-cols-2 gap-3">
             <label className="field">
-              <span className="label">Conta de anúncio conectada</span>
-              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
+              <span className="label">Conta de anúncio {d.extraAccountIds.length ? "principal" : "conectada"}</span>
+              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
                 <option value="">Escolha…</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}{a.account_status && a.account_status !== 1 ? " — não ativa" : ""}</option>
@@ -193,6 +220,14 @@ export default function Wizard({
             </label>
           </div>
 
+          <ExtraAccounts
+            accounts={accounts}
+            main={account}
+            value={d.extraAccountIds}
+            onChange={(extraAccountIds) => setD((x) => ({ ...x, extraAccountIds }))}
+          />
+          {d.extraAccountIds.length > 0 && <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />}
+
           <div>
             <span className="label">Tipo de anúncio</span>
             <div className="grid sm:grid-cols-2 gap-2">
@@ -202,14 +237,22 @@ export default function Wizard({
           </div>
 
           {catalog && (
-            <label className="field">
+            <div className="field">
               <span className="label">Catálogo vinculado</span>
-              <select className="select" value={d.campaign.catalogId} onChange={(e) => { setC({ catalogId: e.target.value }); setA({ productSetId: "" }); }}>
-                <option value="">{loading ? "Carregando…" : look.catalogs.length ? "Escolha…" : "Nenhum catálogo no BM da conta"}</option>
+              <select className="select" aria-label="Catálogo vinculado" value={d.campaign.catalogId} onChange={(e) => { setC({ catalogId: e.target.value }); setA({ productSetId: "" }); }}>
+                <option value="">{loading ? "Carregando…" : look.catalogs.length ? "Escolha…" : "Nenhum catálogo no BM da conta — crie abaixo"}</option>
                 {look.catalogs.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.product_count ?? 0} produto(s)</option>)}
               </select>
+              <NewCatalog
+                accountId={d.accountId}
+                onCreated={(c) => {
+                  setLook((l) => ({ ...l, catalogs: [{ id: c.id, name: c.name, product_count: 0 }, ...l.catalogs] }));
+                  setC({ catalogId: c.id });
+                  setA({ productSetId: "" });
+                }}
+              />
               <span className="text-xs text-muted">Gerencie produtos e mídias em <Link className="underline" href="/automacao/catalogos">Catálogos</Link>.</span>
-            </label>
+            </div>
           )}
 
           <div>
@@ -318,8 +361,8 @@ export default function Wizard({
             <label className="field">
               <span className="label">Conjunto de produtos</span>
               <select className="select" value={d.adset.productSetId} onChange={(e) => setA({ productSetId: e.target.value })}>
-                <option value="">{d.campaign.catalogId ? (sets.length ? "Escolha…" : "Carregando…") : "Escolha o catálogo na etapa 1"}</option>
-                {sets.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.product_count ?? 0} produto(s)</option>)}
+                <option value="">{!d.campaign.catalogId ? "Escolha o catálogo na etapa 1" : sets === null ? "Carregando…" : sets.length ? "Escolha…" : "Nenhum conjunto de produtos — adicione produtos ao catálogo"}</option>
+                {(sets ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} · {s.product_count ?? 0} produto(s)</option>)}
               </select>
             </label>
           )}
@@ -509,6 +552,7 @@ export default function Wizard({
         <section className="grid gap-4">
           <Summary title="Campanha" onEdit={() => setStep(1)} rows={[
             ["Conta", account ? `${account.name} (${account.id})` : "—"],
+            ...(d.extraAccountIds.length ? [["Também em", d.extraAccountIds.map((id) => accounts.find((a) => a.id === id)?.name ?? id).join(", ")] as [string, string]] : []),
             ["Nome", d.campaign.name || "—"],
             ["Tipo", catalog ? "Catálogo" : "Imagens e vídeos"],
             ["Objetivo", label(OBJECTIVES.map(([k, l]) => [k, l] as [string, string]), d.campaign.objective)],
@@ -517,6 +561,11 @@ export default function Wizard({
             ["Status inicial", d.campaign.status === "ACTIVE" ? "Ativa" : "Pausada"],
             ...(catalog ? [["Catálogo", look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name ?? d.campaign.catalogId] as [string, string]] : []),
           ]} />
+          {d.extraAccountIds.length > 0 && (
+            <section className="panel panel-pad">
+              <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />
+            </section>
+          )}
           <Summary title="Conjunto" onEdit={() => setStep(2)} rows={[
             ["Nome", d.adset.name || "—"],
             ["Otimização", label(GOALS[d.campaign.objective], d.adset.optimizationGoal)],
@@ -546,13 +595,13 @@ export default function Wizard({
           <div className="panel panel-pad space-y-3">
             <h2>O que vai acontecer</h2>
             <ol className="text-sm text-muted list-decimal pl-5 space-y-0.5">
-              <li>Criação da campanha e do conjunto na conta {account?.name}.</li>
+              <li>Criação da campanha e do conjunto na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
               <li>Criação de {catalog ? 1 : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
             <p className="text-xs text-muted">Cada etapa aparece na tela de processamento. Se cair a conexão ou você recarregar, nada é criado em dobro.</p>
-            <button type="button" className="btn btn-primary" disabled={publishing || allErrors.length > 0} onClick={publish}>
+            <button type="button" className="btn btn-primary" disabled={publishing || allErrors.length > 0 || checks.loading} onClick={publish}>
               {publishing ? "Validando e enviando…" : "Publicar na Meta"}
             </button>
           </div>
@@ -606,6 +655,173 @@ function StepNav({ step, setStep }: { step: number; setStep: (n: number) => void
       <button type="button" className="btn btn-primary" onClick={() => { setStep(step + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
         {step === 3 ? "Revisar" : "Continuar"} →
       </button>
+    </div>
+  );
+}
+
+function ExtraAccounts({ accounts, main, value, onChange }: { accounts: AccountLite[]; main?: AccountLite; value: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(value.length > 0);
+  const [q, setQ] = useState("");
+  const others = accounts.filter((a) => a.id !== main?.id);
+  const terms = norm(q).split(/\s+/).filter(Boolean);
+  const shown = others.filter((a) => terms.every((t) => norm(`${a.name} ${a.id} ${a.profile_name}`).includes(t)));
+  const chosen = value.map((id) => accounts.find((a) => a.id === id)).filter(Boolean) as AccountLite[];
+  const otherCurrency = main ? chosen.filter((a) => a.currency !== main.currency) : [];
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+
+  if (!open) {
+    return others.length ? (
+      <button type="button" className="text-sm text-info text-left" onClick={() => setOpen(true)}>+ Publicar também em outras contas de anúncio</button>
+    ) : null;
+  }
+  return (
+    <div className="grid gap-2">
+      <span className="label !mb-0 flex items-center justify-between gap-2">
+        Publicar também em outras contas ({value.length} marcada(s))
+        {value.length > 0 && <button type="button" className="text-info text-xs" onClick={() => onChange([])}>Limpar</button>}
+      </span>
+      {chosen.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chosen.map((a) => <span key={a.id} className="chip">{a.name}<button type="button" onClick={() => toggle(a.id)} aria-label={`Remover ${a.name}`}>×</button></span>)}
+        </div>
+      )}
+      <input type="search" className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Pesquisar conta por nome, ID ou perfil…" />
+      <div className="flex items-center justify-between text-xs text-muted">
+        <span>{shown.length} conta(s){q ? " encontrada(s)" : ""}</span>
+        {shown.length > 0 && (
+          <button type="button" className="text-info" onClick={() => onChange([...new Set([...value, ...shown.map((a) => a.id)])])}>Marcar {q ? "as encontradas" : "todas"}</button>
+        )}
+      </div>
+      <ul className="divide-y divide-[#1f3a44] border border-line rounded-xl max-h-64 overflow-y-auto">
+        {shown.map((a) => (
+          <li key={a.id}>
+            <label className="flex items-center gap-3 px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={value.includes(a.id)} onChange={() => toggle(a.id)} />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate text-sm">{a.name}</span>
+                <span className="text-xs text-muted">{a.id.replace("act_", "")} · {a.currency} · {a.profile_name}{a.account_status && a.account_status !== 1 ? " · não ativa" : ""}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+        {!shown.length && <li className="px-3 py-3 text-sm text-muted">Nenhuma conta encontrada.</li>}
+      </ul>
+      {otherCurrency.length > 0 && (
+        <p className="notice notice-warn text-sm">Moeda diferente da conta principal ({main?.currency}): {otherCurrency.map((a) => `${a.name} (${a.currency})`).join(", ")}. Remova essas contas: o orçamento seria lido em outra moeda e a publicação é bloqueada.</p>
+      )}
+      <span className="text-xs text-muted">A mesma campanha é criada em cada conta marcada, com o mesmo orçamento, público e criativos. O mesmo pixel é usado em todas as contas onde ele for encontrado, mesmo em BMs diferentes.</span>
+    </div>
+  );
+}
+
+const TONE: Record<Status, string> = { none: "text-muted", ok: "pos", share: "text-info", own: "text-spend", error: "neg" };
+
+function AccountChecks({ checks, main, d, pixelName, catalogName }: { checks: Checks; main?: AccountLite; d: DraftData; pixelName?: string; catalogName?: string }) {
+  const showCatalog = d.creative.mode === "catalog";
+  const showAud = d.adset.audiences.length + d.adset.excludedAudiences.length > 0;
+  const bad = checks.list.filter((c) => c.errors.length).length;
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="label !mb-0">Conferência das contas</span>
+        <span className="text-xs text-muted">
+          {checks.loading ? "conferindo na Meta…" : checks.error ? "" : bad ? `${bad} conta(s) com pendência` : checks.list.length ? "todas prontas" : ""}
+        </span>
+      </div>
+      {checks.error && <p className="notice notice-err text-sm">Não deu para conferir as contas: {checks.error}</p>}
+      <div className="overflow-x-auto border border-line rounded-xl">
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted text-left">
+            <tr>
+              <th className="px-3 py-2 font-medium">Conta</th>
+              <th className="px-3 py-2 font-medium">BM</th>
+              <th className="px-3 py-2 font-medium">Pixel</th>
+              {showCatalog && <th className="px-3 py-2 font-medium">Catálogo</th>}
+              {showAud && <th className="px-3 py-2 font-medium">Públicos</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#1f3a44]">
+            <tr>
+              <td className="px-3 py-2"><b>{main?.name ?? "—"}</b> <span className="text-xs text-muted">principal · {main?.currency}</span></td>
+              <td className="px-3 py-2">{checks.main?.businessName ?? (checks.loading ? "…" : "sem BM")}</td>
+              <td className="px-3 py-2">{d.adset.pixelId ? pixelName ?? d.adset.pixelId : <span className="text-muted">escolha na etapa 2</span>}</td>
+              {showCatalog && <td className="px-3 py-2">{catalogName ?? <span className="text-muted">escolha acima</span>}</td>}
+              {showAud && <td className="px-3 py-2 text-muted">{d.adset.audiences.length + d.adset.excludedAudiences.length} público(s)</td>}
+            </tr>
+            {d.extraAccountIds.map((id) => {
+              const c = checks.list.find((x) => x.accountId === id);
+              const sameBm = c?.business && checks.main?.businessId === c.business.id;
+              return (
+                <Fragment key={id}>
+                  <tr>
+                    <td className="px-3 py-2">{c?.name ?? id} <span className="text-xs text-muted">{c?.currency ?? ""}</span></td>
+                    <td className="px-3 py-2">
+                      {!c ? "…" : c.business ? <>{c.business.name} {sameBm ? <span className="text-xs pos">mesmo BM</span> : <span className="text-xs text-spend">outro BM</span>}</> : <span className="text-spend">sem BM</span>}
+                    </td>
+                    <td className={`px-3 py-2 ${c ? TONE[c.pixel.status] : ""}`}>{c?.pixel.note ?? "…"}</td>
+                    {showCatalog && <td className={`px-3 py-2 ${c ? TONE[c.catalog.status] : ""}`}>{c?.catalog.note || "…"}</td>}
+                    {showAud && <td className={`px-3 py-2 ${c ? TONE[c.audiences.status] : ""}`}>{c?.audiences.note || "…"}</td>}
+                  </tr>
+                  {c && c.errors.length > 0 && (
+                    <tr><td colSpan={5} className="px-3 pb-2 pt-0"><ul className="text-xs neg list-disc pl-4">{c.errors.map((e) => <li key={e}>{e}</li>)}</ul></td></tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <span className="text-xs text-muted">
+        O mesmo pixel é usado em todas as contas cujo BM enxerga o pixel (mesmo BM ou pixel compartilhado com o BM delas); ele é ligado à conta automaticamente ao publicar. O catálogo do BM vale para todas as contas dele.
+      </span>
+    </div>
+  );
+}
+
+function norm(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function NewCatalog({ accountId, onCreated }: { accountId: string; onCreated: (c: { id: string; name: string }) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [made, setMade] = useState<{ id: string; profileId?: string } | null>(null);
+
+  async function create() {
+    setBusy(true);
+    setErr(null);
+    const r = await createCatalogForAccountAction(accountId, name).catch((e) => ({ error: String(e?.message ?? e) }) as { error: string; id?: undefined });
+    setBusy(false);
+    if (!r.id) { setErr(r.error ?? "Falha ao criar o catálogo."); return; }
+    setMade({ id: r.id, profileId: (r as any).profileId });
+    onCreated({ id: r.id, name: name.trim() });
+    setOpen(false);
+    setName("");
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      {made && (
+        <p className="notice notice-ok text-sm">
+          Catálogo criado e selecionado. Ele começa vazio:{" "}
+          <Link className="underline" target="_blank" href={`/automacao/catalogos/${made.id}${made.profileId ? `?perfil=${made.profileId}` : ""}`}>adicione os produtos</Link>{" "}
+          (abre em outra aba) e depois volte aqui.
+        </p>
+      )}
+      {!open ? (
+        <button type="button" className="text-sm text-info text-left" disabled={!accountId} onClick={() => setOpen(true)}>+ Criar catálogo novo</button>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <input className="input flex-1 min-w-48" value={name} maxLength={100} autoFocus placeholder="Nome do catálogo" onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (name.trim() && !busy) create(); } }} />
+          <button type="button" className="btn btn-primary" disabled={busy || !name.trim()} onClick={create}>{busy ? "Criando…" : "Criar"}</button>
+          <button type="button" className="btn" disabled={busy} onClick={() => { setOpen(false); setErr(null); }}>Cancelar</button>
+        </div>
+      )}
+      {err && <span className="text-xs neg">{err}</span>}
+      <span className="text-xs text-muted">O catálogo é criado no Business Manager dono da conta de anúncio.</span>
     </div>
   );
 }

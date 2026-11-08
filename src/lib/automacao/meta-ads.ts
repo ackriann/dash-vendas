@@ -15,6 +15,30 @@ export async function listAccountPixels(auth: MetaAuth, act: string) {
   return graphAll<{ id: string; name: string; last_fired_time?: string }>(`${act}/adspixels`, { fields: "id,name,last_fired_time" }, auth, 3);
 }
 
+/** BM dono do pixel (para saber se dá para compartilhar com outra conta do mesmo BM). */
+export async function pixelOwner(auth: MetaAuth, pixelId: string) {
+  const r = await graph<{ owner_business?: { id: string; name: string } }>(pixelId, { params: { fields: "owner_business{id,name}" }, auth });
+  return r.owner_business ?? null;
+}
+
+/** Pixels que o BM enxerga: os dele e os que outros BMs compartilharam com ele. */
+export async function businessPixelIds(auth: MetaAuth, businessId: string): Promise<Set<string>> {
+  const [owned, client] = await Promise.all([
+    graphAll<{ id: string }>(`${businessId}/adspixels`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]),
+    graphAll<{ id: string }>(`${businessId}/client_pixels`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]),
+  ]);
+  return new Set([...owned, ...client].map((p) => p.id));
+}
+
+/** Liga o pixel a uma conta de anúncio, pelo BM da conta (dono do pixel ou que recebeu o pixel compartilhado). */
+export async function sharePixel(auth: MetaAuth, pixelId: string, act: string, businessId: string) {
+  return graph<{ success?: boolean }>(`${pixelId}/shared_accounts`, {
+    method: "POST",
+    params: { account_id: act.replace(/^act_/, ""), business: businessId },
+    auth,
+  });
+}
+
 export async function accountInfo(auth: MetaAuth, act: string) {
   return graph<{ id: string; name: string; currency: string; account_status: number; timezone_name?: string; business?: { id: string; name: string } }>(act, {
     params: { fields: "id,name,currency,account_status,timezone_name,business{id,name}" },

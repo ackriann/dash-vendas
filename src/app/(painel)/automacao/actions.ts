@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
 import { db } from "@/lib/db";
-import { profileAuth } from "@/lib/profiles";
-import { createCatalog, getProduct } from "@/lib/automacao/meta-ads";
+import { authForAccount, profileAuth } from "@/lib/profiles";
+import { accountInfo, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
 import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, getDraft, publishDraft, retryRun, runDueSchedules } from "@/lib/automacao/engine";
 import { emptyDraft, normalizeDraft, type DraftData } from "@/lib/automacao/types";
@@ -53,7 +53,7 @@ export async function saveDraftAction(id: string, data: DraftData, step: number)
 }
 
 /** Valida tudo, salva e põe a publicação na fila. */
-export async function publishDraftAction(id: string, data: DraftData): Promise<{ runId?: string; errors?: string[] }> {
+export async function publishDraftAction(id: string, data: DraftData): Promise<{ runId?: string; runIds?: string[]; errors?: string[] }> {
   await requireAuth();
   const saved = await saveDraftAction(id, data, 4);
   if (!saved.ok) {
@@ -66,7 +66,7 @@ export async function publishDraftAction(id: string, data: DraftData): Promise<{
     const r = await publishDraft(id);
     if (r.errors?.length) return { errors: r.errors };
     revalidatePath("/automacao");
-    return { runId: r.runId };
+    return { runId: r.runId, runIds: r.runIds };
   } catch (e: any) {
     return { errors: [e?.message ?? "Falha ao publicar."] };
   }
@@ -161,6 +161,24 @@ export async function createCatalogAction(formData: FormData) {
     go(back, "erro", `A Meta não criou o catálogo: ${e?.message ?? "sem permissão"}. Confira se o perfil tem catalog_management e é admin do BM.`);
   }
   go(`/automacao/catalogos/${id}?perfil=${profile}`, "ok", "Catálogo criado.");
+}
+
+/** Cria o catálogo no Business Manager dono da conta de anúncio (botão do assistente de criação). */
+export async function createCatalogForAccountAction(accountId: string, name: string): Promise<{ id?: string; name?: string; profileId?: string; error?: string }> {
+  await requireAuth();
+  name = name.trim();
+  if (!name) return { error: "Dê um nome ao catálogo." };
+  if (!/^act_\d+$/.test(accountId)) return { error: "Escolha a conta de anúncio." };
+  try {
+    const auth = await authForAccount(accountId);
+    const info = await accountInfo(auth, accountId);
+    if (!info.business?.id) return { error: "Esta conta de anúncio não está em um Business Manager; catálogos só existem dentro de um BM." };
+    const { id } = await createCatalog(auth, info.business.id, name);
+    const { data: acc } = await db().from("ad_accounts").select("profile_id").eq("id", accountId).maybeSingle();
+    return { id, name, profileId: acc?.profile_id ?? undefined };
+  } catch (e: any) {
+    return { error: `A Meta não criou o catálogo: ${e?.message ?? "sem permissão"}. Confira se o perfil tem catalog_management e é admin do BM.` };
+  }
 }
 
 function mediaData(images: { public_url: string }[], videos: { public_url: string }[]) {

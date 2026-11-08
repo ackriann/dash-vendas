@@ -273,7 +273,11 @@ onRunFinished("publish", async (run, jobs) => {
     ad_ids: jobs.filter((j) => j.key.startsWith("ad:")).map((j) => j.meta_id).filter(Boolean),
   };
   await db().from("ops_runs").update({ summary: { ...run.summary, ids } }).eq("id", run.id);
-  await db().from("auto_drafts").update({ status: run.status === "done" ? "published" : "failed", updated_at: new Date().toISOString() }).eq("id", run.ref_id);
+  // Rascunho em várias contas: um processo por conta, o status do rascunho olha todos
+  const { data: siblings } = await db().from("ops_runs").select("id,status").eq("kind", "publish").eq("ref_id", run.ref_id);
+  const all = (siblings ?? []).map((r: any) => (r.id === run.id ? run.status : r.status));
+  const status = all.some((s) => s === "failed" || s === "canceled") ? "failed" : all.every((s) => s === "done") ? "published" : null;
+  if (status) await db().from("auto_drafts").update({ status, updated_at: new Date().toISOString() }).eq("id", run.ref_id);
 });
 
 // ------------------------------------------------------------- Sincronização de Páginas

@@ -73,6 +73,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
         </p>
         <div className="flex gap-2">
           {draft.run_id && <Link className="btn btn-primary" href={`/automacao/processos/${draft.run_id}`}>Ver processo</Link>}
+          {draft.data.extraAccountIds.length > 0 && <Link className="btn" href="/automacao/processos">Processos de todas as contas</Link>}
           <form action={duplicateDraftAction}><input type="hidden" name="id" value={draft.id} /><SubmitButton className="btn" pendingText="…">Duplicar rascunho</SubmitButton></form>
         </div>
       </div>

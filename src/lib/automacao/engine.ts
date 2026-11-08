@@ -1,7 +1,7 @@
 import "server-only";
 import { db, logEvent } from "../db";
-import { authOf, getProfile } from "../profiles";
-import { getProduct } from "./meta-ads";
+import { authForAccount, authOf, getProfile } from "../profiles";
+import { accountInfo, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
 import { getMediaMany } from "./media";
 import { normalizeDraft, validateDraft, type DraftData } from "./types";
 import { createRun, kick, retryRun, tick, type JobSpec } from "./queue";
@@ -94,19 +94,155 @@ async function publishJobs(d: DraftData): Promise<JobSpec[]> {
   return jobs;
 }
 
+export interface AccountCheck {
+  accountId: string;
+  name: string;
+  currency: string | null;
+  business: { id: string; name: string } | null;
+  /** ok = pixel já está na conta · share = mesmo BM, compartilhado ao publicar · own = usa o único pixel da conta */
+  pixel: { status: "none" | "ok" | "share" | "own" | "error"; id: string; note: string };
+  catalog: { status: "none" | "ok" | "error"; note: string };
+  audiences: { status: "none" | "ok" | "error"; note: string };
+  errors: string[];
+}
+
 /**
- * Publica o rascunho. Um rascunho tem um único processo de publicação:
+ * Confere uma conta extra contra o rascunho. Pixel, catálogo e públicos são
+ * do BM/conta: no mesmo BM o pixel é o mesmo (compartilhado ao publicar) e o
+ * catálogo do BM serve para todas as contas dele.
+ */
+export async function checkAccount(d: DraftData, accountId: string, main: { currency: string | null; businessId: string | null }): Promise<AccountCheck> {
+  const { data: acc } = await db().from("ad_accounts").select("name,currency").eq("id", accountId).maybeSingle();
+  const c: AccountCheck = {
+    accountId,
+    name: acc?.name ?? accountId,
+    currency: acc?.currency ?? null,
+    business: null,
+    pixel: { status: "none", id: "", note: "Sem pixel no conjunto" },
+    catalog: { status: "none", note: "" },
+    audiences: { status: "none", note: "" },
+    errors: [],
+  };
+  if (main.currency && c.currency && c.currency !== main.currency) {
+    c.errors.push(`Moeda ${c.currency} diferente da conta principal (${main.currency}): o orçamento seria lido em outra moeda.`);
+  }
+  const auth = await authForAccount(accountId);
+  const info = await accountInfo(auth, accountId);
+  c.business = info.business ?? null;
+
+  if (d.adset.pixelId) {
+    const pixels = await listAccountPixels(auth, accountId).catch(() => []);
+    if (pixels.some((p) => p.id === d.adset.pixelId)) {
+      c.pixel = { status: "ok", id: d.adset.pixelId, note: "Mesmo pixel (já está na conta)" };
+    } else {
+      // Mesmo pixel sempre que o BM da conta o enxerga (dono ou compartilhado de outro BM)
+      const owner = await pixelOwner(auth, d.adset.pixelId).catch(() => null);
+      const sameBm = !!(owner && c.business && owner.id === c.business.id);
+      const visible = sameBm || (c.business ? (await businessPixelIds(auth, c.business.id)).has(d.adset.pixelId) : false);
+      if (visible && c.business) {
+        c.pixel = {
+          status: "share",
+          id: d.adset.pixelId,
+          note: sameBm ? `Mesmo pixel — ligado à conta ao publicar (BM ${c.business.name})` : `Mesmo pixel (compartilhado com o BM ${c.business.name}) — ligado à conta ao publicar`,
+        };
+      } else if (pixels.length === 1) {
+        c.pixel = { status: "own", id: pixels[0].id, note: `O pixel escolhido não está no BM desta conta: usa o pixel da própria conta, ${pixels[0].name}` };
+      } else {
+        c.pixel = { status: "error", id: "", note: "Pixel não encontrado no BM" };
+        c.errors.push(pixels.length
+          ? `O pixel escolhido não está no BM desta conta e ela tem ${pixels.length} pixels. Compartilhe o pixel com o BM dela no Gerenciador de Negócios.`
+          : "O pixel escolhido não está no BM desta conta e ela não tem pixel próprio. Compartilhe o pixel com o BM dela no Gerenciador de Negócios.");
+      }
+    }
+  }
+
+  if (d.creative.mode === "catalog" && d.campaign.catalogId) {
+    const catalogs = await listAccountCatalogs(auth, accountId).catch(() => []);
+    if (catalogs.some((x) => x.id === d.campaign.catalogId)) c.catalog = { status: "ok", note: "Mesmo catálogo (está no BM da conta)" };
+    else {
+      c.catalog = { status: "error", note: "Catálogo de outro BM" };
+      c.errors.push(main.businessId && c.business?.id !== main.businessId
+        ? "A conta é de outro BM e o catálogo não está nele. Use contas do mesmo BM ou compartilhe o catálogo com o BM da conta."
+        : "O catálogo não está disponível para esta conta.");
+    }
+  }
+
+  const wanted = [...d.adset.audiences, ...d.adset.excludedAudiences];
+  if (wanted.length) {
+    const own = new Set((await listCustomAudiences(auth, accountId).catch(() => [])).map((a) => a.id));
+    const missing = wanted.filter((a) => !own.has(a.id));
+    c.audiences = missing.length ? { status: "error", note: `Faltam: ${missing.map((a) => a.name).join(", ")}` } : { status: "ok", note: "Públicos disponíveis" };
+    if (missing.length) c.errors.push(`Públicos não compartilhados com a conta: ${missing.map((a) => a.name).join(", ")}.`);
+  }
+  return c;
+}
+
+/** Moeda e BM da conta principal, usados na conferência das contas extras. */
+export async function mainAccountRef(accountId: string) {
+  const { data: acc } = await db().from("ad_accounts").select("currency").eq("id", accountId).maybeSingle();
+  const info = await accountInfo(await authForAccount(accountId), accountId).catch(() => null);
+  return { currency: acc?.currency ?? null, businessId: info?.business?.id ?? null, businessName: info?.business?.name ?? null };
+}
+
+/**
+ * Publica o rascunho. Cada conta tem um único processo de publicação:
  * publicar de novo depois de uma falha continua o mesmo processo (o que já
  * foi criado na Meta é reaproveitado), nunca cria uma segunda campanha.
  */
-export async function publishDraft(draftId: string): Promise<{ runId: string; errors?: string[] }> {
+export async function publishDraft(draftId: string): Promise<{ runId: string; runIds?: string[]; errors?: string[] }> {
   const draft = await getDraft(draftId);
   if (!draft) throw new Error("Rascunho não encontrado.");
-  const errors = await checkBeforePublish(draft.data);
+  const accountIds = [draft.data.accountId, ...draft.data.extraAccountIds.filter((a) => a !== draft.data.accountId)];
+  const multi = accountIds.length > 1;
+  const { data: accs } = await db().from("ad_accounts").select("id,name,currency").in("id", accountIds);
+  const accOf = (id: string) => (accs ?? []).find((a: any) => a.id === id);
+
+  const variants: DraftData[] = [];
+  const shares: { accountId: string; pixelId: string; businessId: string }[] = [];
+  const errors: string[] = [];
+  const first = await checkBeforePublish({ ...draft.data, extraAccountIds: [] });
+  if (first.length) return { runId: "", errors: first };
+  variants.push({ ...draft.data, extraAccountIds: [] });
+  const main = multi ? await mainAccountRef(accountIds[0]) : { currency: null, businessId: null };
+  for (const accountId of accountIds.slice(1)) {
+    const d: DraftData = { ...draft.data, accountId, extraAccountIds: [] };
+    let errs = await checkBeforePublish(d);
+    if (!errs.length) {
+      try {
+        const c = await checkAccount(d, accountId, main);
+        errs = c.errors;
+        if (c.pixel.id) d.adset = { ...d.adset, pixelId: c.pixel.id };
+        if (c.pixel.status === "share" && c.business) shares.push({ accountId, pixelId: c.pixel.id, businessId: c.business.id });
+      } catch (e: any) {
+        errs = [e?.message ?? "falha ao consultar a conta."];
+      }
+    }
+    errors.push(...errs.map((e) => `${accOf(accountId)?.name ?? accountId}: ${e}`));
+    variants.push(d);
+  }
   if (errors.length) return { runId: "", errors };
 
-  const jobs = await publishJobs(draft.data);
-  const idemKey = `publish:${draftId}`;
+  // Pixel no BM da conta (próprio ou compartilhado): liga à conta antes de criar os conjuntos
+  for (const s of shares) {
+    try {
+      await sharePixel(await authForAccount(s.accountId), s.pixelId, s.accountId, s.businessId);
+    } catch (e: any) {
+      errors.push(`${accOf(s.accountId)?.name ?? s.accountId}: a Meta não ligou o pixel à conta (${e?.message ?? "sem permissão"}). O perfil precisa ser admin do BM da conta.`);
+    }
+  }
+  if (errors.length) return { runId: "", errors };
+
+  const runIds: string[] = [];
+  for (const [i, d] of variants.entries()) {
+    const title = (draft.data.campaign.name || draft.name) + (multi ? ` · ${accOf(d.accountId)?.name ?? d.accountId}` : "");
+    runIds.push(await publishOne(draftId, d, i === 0 ? `publish:${draftId}` : `publish:${draftId}:${d.accountId}`, title));
+  }
+  await db().from("auto_drafts").update({ status: "queued", run_id: runIds[0], updated_at: new Date().toISOString() }).eq("id", draftId);
+  return { runId: runIds[0], runIds };
+}
+
+async function publishOne(draftId: string, d: DraftData, idemKey: string, title: string): Promise<string> {
+  const jobs = await publishJobs(d);
   const { data: prev } = await db().from("ops_runs").select("id,status,summary").eq("idem_key", idemKey).maybeSingle();
 
   if (prev) {
@@ -120,24 +256,22 @@ export async function publishDraft(draftId: string): Promise<{ runId: string; er
         .filter((j) => !doneKeys.has(j.key))
         .map((j) => ({ run_id: prev.id, seq: j.seq, key: j.key, kind: j.kind, label: j.label, input: j.input ?? {} }));
       if (rows.length) await db().from("ops_jobs").insert(rows);
-      await db().from("ops_runs").update({ summary: { ...prev.summary, draft: draft.data } }).eq("id", prev.id);
+      await db().from("ops_runs").update({ summary: { ...prev.summary, draft: d } }).eq("id", prev.id);
       await retryRun(prev.id);
     }
-    await db().from("auto_drafts").update({ status: "queued", run_id: prev.id }).eq("id", draftId);
-    return { runId: prev.id };
+    return prev.id;
   }
 
   const { id } = await createRun({
     kind: "publish",
-    title: draft.data.campaign.name || draft.name,
+    title,
     idemKey,
     refId: draftId,
-    summary: { draft: draft.data, accountId: draft.data.accountId },
+    summary: { draft: d, accountId: d.accountId },
     jobs,
   });
-  await db().from("auto_drafts").update({ status: "queued", run_id: id, updated_at: new Date().toISOString() }).eq("id", draftId);
   await kick(id);
-  return { runId: id };
+  return id;
 }
 
 // ------------------------------------------------------------- Páginas
