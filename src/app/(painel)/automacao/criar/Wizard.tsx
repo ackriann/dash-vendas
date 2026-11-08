@@ -674,6 +674,7 @@ export default function Wizard({
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
               ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, no mesmo conjunto)` : "1 com todos os produtos"] as [string, string],
+              ["Vídeos", d.catalog.delayMinutes > 0 ? `Atualização agendada em ${d.catalog.delayMinutes} minuto(s) após a criação dos anúncios` : "Na criação dos produtos"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
             ["UTMs", d.creative.urlTags || "—"],
@@ -692,6 +693,7 @@ export default function Wizard({
               <li>Criação da campanha e do conjunto na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
               {autoCat && <li>Catálogo do Business Manager da conta (reaproveitado, ou criado uma única vez).</li>}
               {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
+              {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento da inclusão dos vídeos nos produtos após {d.catalog.delayMinutes} minuto(s), com processamento e revisão aplicáveis pela Meta.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
               <li>Criação de {catalog ? (autoCat && d.catalog.adsMode === "per_creative" ? d.creative.mediaIds.length : 1) : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
@@ -978,7 +980,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
 
       {chosen.some((m) => m.kind === "video") ? (
         <div className="grid gap-1.5">
-          <span className="text-sm font-semibold">Imagem de cada criativo <span className="text-xs text-muted font-normal">(o produto nasce com a imagem e o vídeo juntos)</span></span>
+          <span className="text-sm font-semibold">Imagem de cada criativo <span className="text-xs text-muted font-normal">(capa inicial do produto)</span></span>
           <ul className="grid gap-1.5">
             {chosen.filter((m) => m.kind === "video").map((v) => {
               const own = images.find((i) => i.id === d.catalog.images?.[v.id]);
@@ -1021,6 +1023,26 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
       </div>
 
       <PreferVideo d={d} setK={setK} />
+
+      {chosen.some((m) => m.kind === "video") && (
+        <label className="field">
+          <span className="label">Adicionar vídeos após (minutos)</span>
+          <input
+            className="input num"
+            type="number"
+            min={0}
+            max={1440}
+            step={1}
+            value={d.catalog.delayMinutes}
+            onChange={(e) => setK({ delayMinutes: Math.min(1440, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+          />
+          <span className="text-xs text-muted">
+            0 = enviar junto com o catálogo. Acima de 0 = agendar a associação dos vídeos aos mesmos produtos,
+            sem recriar os anúncios. A Meta pode processar e revisar as novas mídias.
+            É necessário manter o agendador do painel ativo.
+          </span>
+        </label>
+      )}
 
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="field">
