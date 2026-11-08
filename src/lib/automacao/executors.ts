@@ -295,7 +295,8 @@ registerExecutor("review", async (ctx) => {
     if (scheduleIds.length) {
       await db().from("catalog_schedules")
         .update({ active: false, last_result: "Cancelada: anúncio reprovado pela Meta" })
-        .in("id", scheduleIds);
+        .in("id", scheduleIds)
+        .eq("active", true);
     }
     const why = rejected
       .map((s) => Object.values(s.ad_review_feedback?.global ?? {}).join(" ") || s.issues_info?.[0]?.error_message || s.effective_status)
