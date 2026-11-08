@@ -93,10 +93,17 @@ registerExecutor("adset", async (ctx) => {
       ...(a.regions.length ? { regions: a.regions.map((r) => ({ key: r.key })) } : {}),
       location_types: ["home", "recent"],
     },
-    age_min: a.ageMin,
-    age_max: a.ageMax,
     targeting_automation: { advantage_audience: a.advantageAudience ? 1 : 0 },
   };
+  // Público Advantage+ (regra da Meta): age_min só de 18 a 25, age_max fixo em 65; o resto vai como sugestão (age_range)
+  if (a.advantageAudience) {
+    targeting.age_min = Math.min(25, Math.max(18, a.ageMinControl ?? 18));
+    const sMin = Math.max(18, a.ageMin);
+    if (sMin !== 18 || a.ageMax !== 65) targeting.age_range = [sMin, a.ageMax];
+  } else {
+    targeting.age_min = a.ageMin;
+    targeting.age_max = a.ageMax;
+  }
   if (a.genders !== "all") targeting.genders = [a.genders === "male" ? 1 : 2];
   if (a.interests.length) targeting.flexible_spec = [{ interests: a.interests.map((i) => ({ id: i.id, name: i.name })) }];
   if (a.audiences.length) targeting.custom_audiences = a.audiences.map((x) => ({ id: x.id }));
@@ -172,7 +179,7 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
   if (cr.mode === "catalog") {
     return {
       product_set_id: d.adset.productSetId,
-      // Priorizar vídeo: mídia dinâmica da Meta (usa o vídeo do produto quando houver)
+      // Priorizar vídeo: mídia dinâmica da Meta + formato single_video (doc "Allow product video in Advantage+ catalog ads")
       ...(d.catalog?.preferVideo ? { degrees_of_freedom_spec: { creative_features_spec: { media_type_automation: { enroll_status: "OPT_IN" } } } } : {}),
       object_story_spec: {
         page_id: cr.pageId,
@@ -183,7 +190,7 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
           name: cr.headline || "{{product.name}}",
           description: cr.description || "{{product.current_price}}",
           call_to_action: ctaOf(d, false),
-          format_option: cr.catalogFormat,
+          format_option: d.catalog?.preferVideo ? "single_video" : cr.catalogFormat,
           multi_share_end_card: false,
         },
       },

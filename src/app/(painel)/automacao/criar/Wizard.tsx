@@ -2,13 +2,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import MediaUploader, { uploadMedia } from "@/components/automacao/MediaUploader";
+import MediaUploader from "@/components/automacao/MediaUploader";
 import {
   BID_STRATEGIES, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
-  RECOMMENDED_URL_TAGS, STEP_LABELS, coverBase, needsBidAmount, validateDraft,
+  RECOMMENDED_URL_TAGS, STEP_LABELS, needsBidAmount, validateDraft,
   type AccountLite, type CatalogAuto, type CatalogPrefs, type DraftData, type MediaLite, type Named, type PageLite, type Region,
 } from "@/lib/automacao/types";
-import { createCatalogForAccountAction, publishDraftAction, saveDraftAction } from "../actions";
+import { createCatalogForAccountAction, publishDraftAction, saveDraftAction, saveProductImageAction } from "../actions";
 
 type Lookups = {
   pixels: { id: string; name: string; last_fired_time?: string }[];
@@ -86,30 +86,11 @@ export default function Wizard({
   const setCr = (p: Partial<DraftData["creative"]>) => setD((x) => ({ ...x, creative: { ...x.creative, ...p } }));
   const setK = (p: Partial<CatalogAuto>) => setD((x) => ({ ...x, catalog: { ...x.catalog, ...p } }));
 
-  // Capas dos vídeos do catálogo automático: escolhida, com o mesmo nome na biblioteca ou gerada de um frame
-  const [coverJob, setCoverJob] = useState<Record<string, string>>({});
+  // Imagem padrão do produto (catálogo automático): a Meta pede pelo menos 500×500
   const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({});
   const chosenMedia = d.creative.mediaIds.map((id) => media.find((m) => m.id === id)).filter(Boolean) as MediaLite[];
-  const coverOf = (v: MediaLite) =>
-    media.find((m) => m.id === d.catalog.covers[v.id] && m.kind === "image") ?? media.find((m) => m.kind === "image" && coverBase(m.name) === coverBase(v.name));
-  useEffect(() => {
-    if (!autoCat) return;
-    for (const v of chosenMedia) {
-      if (v.kind !== "video" || coverOf(v) || coverJob[v.id]) continue;
-      setCoverJob((j) => ({ ...j, [v.id]: "working" }));
-      captureFrame(v.public_url)
-        .then((blob) => uploadMedia(new File([blob], `${coverBase(v.name)}-capa.jpg`, { type: "image/jpeg" })))
-        .then((img) => {
-          setMedia((l) => [img, ...l]);
-          setD((x) => ({ ...x, catalog: { ...x.catalog, covers: { ...x.catalog.covers, [v.id]: img.id } } }));
-          setCoverJob((j) => ({ ...j, [v.id]: "done" }));
-        })
-        .catch((e) => setCoverJob((j) => ({ ...j, [v.id]: `Não deu para gerar a capa: ${e?.message ?? e}. Escolha uma imagem.` })));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoCat, d.creative.mediaIds, media]);
-  // Resolução das imagens que vão para os produtos (a Meta pede pelo menos 500×500)
-  const productImages = autoCat ? chosenMedia.map((m) => (m.kind === "video" ? coverOf(m) : m)).filter(Boolean) as MediaLite[] : [];
+  const productImage = media.find((m) => m.id === d.catalog.productImageId && m.kind === "image");
+  const productImages = autoCat ? [productImage, ...chosenMedia.filter((m) => m.kind === "image")].filter(Boolean) as MediaLite[] : [];
   useEffect(() => {
     for (const m of productImages) {
       if (dims[m.id]) continue;
@@ -120,11 +101,12 @@ export default function Wizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productImages.map((m) => m.id).join()]);
   const coverErrors = autoCat
-    ? [
-        ...chosenMedia.filter((v) => v.kind === "video" && !coverOf(v)).map((v) => (coverJob[v.id] === "working" ? `Gerando a capa de ${v.name}…` : `Falta a capa de ${v.name}.`)),
-        ...productImages.filter((m) => dims[m.id] && (dims[m.id].w < 500 || dims[m.id].h < 500)).map((m) => `A imagem ${m.name} tem ${dims[m.id].w}×${dims[m.id].h}; o catálogo pede pelo menos 500×500.`),
-      ]
+    ? productImages.filter((m) => dims[m.id] && (dims[m.id].w < 500 || dims[m.id].h < 500)).map((m) => `A imagem ${m.name} tem ${dims[m.id].w}×${dims[m.id].h}; o catálogo pede pelo menos 500×500.`)
     : [];
+  function chooseProductImage(id: string) {
+    setK({ productImageId: id });
+    saveProductImageAction(id).catch(() => {});
+  }
 
   // Salva sozinho 1,2 s depois da última alteração
   useEffect(() => {
@@ -203,7 +185,9 @@ export default function Wizard({
       changeObjective("OUTCOME_SALES");
       // Preferências da última campanha de catálogo
       const { catalogFormat, ...prefs } = catalogPrefs;
-      setD((x) => (x.catalog.price === null ? { ...x, catalog: { ...x.catalog, ...prefs }, creative: { ...x.creative, catalogFormat: catalogFormat ?? x.creative.catalogFormat } } : x));
+      setD((x) => (x.catalog.price === null
+        ? { ...x, catalog: { ...x.catalog, ...prefs }, creative: { ...x.creative, catalogFormat: catalogFormat ?? x.creative.catalogFormat } }
+        : !x.catalog.productImageId && prefs.productImageId ? { ...x, catalog: { ...x.catalog, productImageId: prefs.productImageId } } : x));
     }
   }
 
@@ -475,9 +459,23 @@ export default function Wizard({
               nameOf={(r) => `${r.name}${r.country ? ` (${r.country})` : ""}`}
               onChange={(regions) => setA({ regions })}
             />
+            <label className="choice">
+              <input type="checkbox" checked={d.adset.advantageAudience} onChange={(e) => setA({ advantageAudience: e.target.checked })} />
+              <span><b>Público Advantage+</b><span className="block text-xs text-muted">Como no Gerenciador: a Meta pode ir além da segmentação. Idade, gênero, interesses e públicos viram sugestões; só os controles abaixo são obrigatórios.</span></span>
+            </label>
+            {d.adset.advantageAudience && (
+              <div className="grid sm:grid-cols-3 gap-3">
+                <label className="field">
+                  <span className="label">Controle: idade mínima (18 a 25)</span>
+                  <input className="input num" type="number" min={18} max={25} value={d.adset.ageMinControl} onChange={(e) => setA({ ageMinControl: Number(e.target.value) })} />
+                </label>
+                <p className="sm:col-span-2 text-xs text-muted self-end">Regra da Meta no Público Advantage+: o mínimo obrigatório vai até 25 e o máximo é sempre 65+. Para mirar 45+, use a sugestão de idade abaixo.</p>
+              </div>
+            )}
+            {d.adset.advantageAudience && <span className="label !mb-0">Sugestão de público (opcional)</span>}
             <div className="grid sm:grid-cols-3 gap-3">
-              <label className="field"><span className="label">Idade mínima</span><input className="input num" type="number" min={13} max={65} value={d.adset.ageMin} onChange={(e) => setA({ ageMin: Number(e.target.value) })} /></label>
-              <label className="field"><span className="label">Idade máxima</span><input className="input num" type="number" min={13} max={65} value={d.adset.ageMax} onChange={(e) => setA({ ageMax: Number(e.target.value) })} /></label>
+              <label className="field"><span className="label">{d.adset.advantageAudience ? "Sugestão: idade de" : "Idade mínima"}</span><input className="input num" type="number" min={d.adset.advantageAudience ? 18 : 13} max={65} value={d.adset.ageMin} onChange={(e) => setA({ ageMin: Number(e.target.value) })} /></label>
+              <label className="field"><span className="label">{d.adset.advantageAudience ? "Sugestão: idade até" : "Idade máxima"}</span><input className="input num" type="number" min={13} max={65} value={d.adset.ageMax} onChange={(e) => setA({ ageMax: Number(e.target.value) })} /></label>
               <label className="field"><span className="label">Gênero</span>
                 <select className="select" value={d.adset.genders} onChange={(e) => setA({ genders: e.target.value as any })}>
                   <option value="all">Todos</option><option value="male">Homens</option><option value="female">Mulheres</option>
@@ -497,10 +495,6 @@ export default function Wizard({
               <AudiencePick title="Públicos personalizados (incluir)" list={look.audiences} value={d.adset.audiences} onChange={(audiences) => setA({ audiences })} />
               <AudiencePick title="Excluir públicos" list={look.audiences} value={d.adset.excludedAudiences} onChange={(excludedAudiences) => setA({ excludedAudiences })} />
             </div>
-            <label className="choice">
-              <input type="checkbox" checked={d.adset.advantageAudience} onChange={(e) => setA({ advantageAudience: e.target.checked })} />
-              <span><b>Público Advantage+</b><span className="block text-xs text-muted">A Meta pode ir além da segmentação quando achar melhor desempenho (idade e interesses viram sugestões).</span></span>
-            </label>
           </fieldset>
 
           <fieldset className="grid gap-3 border-t border-line pt-4">
@@ -557,7 +551,7 @@ export default function Wizard({
             {(!catalog || autoCat) && (
               <div className="grid gap-2">
                 <span className="label">
-                  {autoCat ? `Criativos dos produtos (${d.creative.mediaIds.length} escolhido(s))` : `Imagens e vídeos (${d.creative.mediaIds.length} escolhida(s) — um anúncio para cada)`}
+                  {autoCat ? `Vídeos dos produtos (${d.creative.mediaIds.length} escolhido(s))` : `Imagens e vídeos (${d.creative.mediaIds.length} escolhida(s) — um anúncio para cada)`}
                 </span>
                 <MediaUploader compact onUploaded={(m) => { setMedia((l) => [m, ...l]); setCr({ mediaIds: [...d.creative.mediaIds, m.id] }); }} />
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[300px] overflow-y-auto pr-1">
@@ -580,8 +574,9 @@ export default function Wizard({
                 d={d}
                 chosen={chosenMedia}
                 media={media}
-                coverOf={coverOf}
-                coverJob={coverJob}
+                productImage={productImage}
+                onProductImage={chooseProductImage}
+                onUploaded={(m) => setMedia((l) => [m, ...l])}
                 dims={dims}
                 cur={cur}
                 setK={setK}
@@ -657,7 +652,7 @@ export default function Wizard({
             ...(needsBidAmount(d.campaign.bidStrategy) ? [["Lance", money(d.adset.bidAmount, cur)] as [string, string]] : []),
             ["Programação", `${d.adset.startTime ? d.adset.startTime.replace("T", " ") : "Agora"} → ${d.adset.endTime ? d.adset.endTime.replace("T", " ") : "sem término"}`],
             ["Locais", [...d.adset.countries, ...d.adset.regions.map((r) => r.name)].join(", ") || "—"],
-            ["Público", `${d.adset.ageMin}–${d.adset.ageMax} · ${d.adset.genders === "all" ? "todos" : d.adset.genders === "male" ? "homens" : "mulheres"}${d.adset.interests.length ? ` · ${d.adset.interests.length} interesse(s)` : ""}${d.adset.audiences.length ? ` · ${d.adset.audiences.length} público(s)` : ""}${d.adset.advantageAudience ? " · Advantage+" : ""}`],
+            ["Público", `${d.adset.advantageAudience ? `mín. ${d.adset.ageMinControl} · sugestão ` : ""}${d.adset.ageMin}–${d.adset.ageMax} · ${d.adset.genders === "all" ? "todos" : d.adset.genders === "male" ? "homens" : "mulheres"}${d.adset.interests.length ? ` · ${d.adset.interests.length} interesse(s)` : ""}${d.adset.audiences.length ? ` · ${d.adset.audiences.length} público(s)` : ""}${d.adset.advantageAudience ? " · Advantage+" : ""}`],
             ["Posicionamentos", d.adset.placements === "auto" ? "Advantage+ (automático)" : d.adset.platforms.map((p) => label(PLATFORMS, p)).join(", ")],
           ]} />
           <Summary title="Criativos" onEdit={() => setStep(3)} rows={[
@@ -917,24 +912,6 @@ function NewCatalog({ accountId, onCreated }: { accountId: string; onCreated: (c
   );
 }
 
-/** Frame do vídeo (no navegador) para virar a capa do produto; garante pelo menos 600 px no menor lado. */
-async function captureFrame(url: string): Promise<Blob> {
-  const v = document.createElement("video");
-  v.crossOrigin = "anonymous";
-  v.muted = true;
-  v.preload = "auto";
-  v.src = url;
-  await new Promise<void>((ok, fail) => { v.onloadeddata = () => ok(); v.onerror = () => fail(new Error("o navegador não abriu o vídeo")); });
-  v.currentTime = Math.min(1, (v.duration || 4) / 4);
-  await new Promise<void>((ok) => { v.onseeked = () => ok(); });
-  const scale = Math.max(1, 600 / Math.min(v.videoWidth || 600, v.videoHeight || 600));
-  const c = document.createElement("canvas");
-  c.width = Math.round(v.videoWidth * scale);
-  c.height = Math.round(v.videoHeight * scale);
-  c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
-  return new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("falha ao gerar a imagem"))), "image/jpeg", 0.9));
-}
-
 function PreferVideo({ d, setK }: { d: DraftData; setK: (p: Partial<CatalogAuto>) => void }) {
   return (
     <label className="choice">
@@ -947,48 +924,51 @@ function PreferVideo({ d, setK }: { d: DraftData; setK: (p: Partial<CatalogAuto>
   );
 }
 
-function CatalogSetup({ d, chosen, media, coverOf, coverJob, dims, cur, setK, setCr }: {
-  d: DraftData; chosen: MediaLite[]; media: MediaLite[]; coverOf: (v: MediaLite) => MediaLite | undefined; coverJob: Record<string, string>;
+function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUploaded, dims, cur, setK, setCr }: {
+  d: DraftData; chosen: MediaLite[]; media: MediaLite[]; productImage?: MediaLite; onProductImage: (id: string) => void; onUploaded: (m: MediaLite) => void;
   dims: Record<string, { w: number; h: number }>; cur: string; setK: (p: Partial<CatalogAuto>) => void; setCr: (p: Partial<DraftData["creative"]>) => void;
 }) {
   const images = media.filter((m) => m.kind === "image");
   const hasVideo = chosen.some((m) => m.kind === "video");
   const advancedOpen = !(Number(d.catalog.price) > 0);
+  const [picking, setPicking] = useState(!productImage);
+  const size = productImage && dims[productImage.id];
   return (
     <div className="grid gap-3 border border-line rounded-xl p-3">
-      <span className="label !mb-0">Produtos do catálogo</span>
-      {chosen.length > 0 ? (
-        <ul className="grid gap-2">
-          {chosen.map((m) => {
-            const cover = m.kind === "video" ? coverOf(m) : m;
-            const job = coverJob[m.id];
-            const size = cover && dims[cover.id];
-            return (
-              <li key={m.id} className="flex items-center gap-3">
-                <span className="w-14 h-14 rounded-lg overflow-hidden bg-surface-2 shrink-0 grid place-items-center text-[10px] text-muted">
-                  {cover ? <img src={cover.public_url} alt="" className="w-full h-full object-cover" /> : job === "working" ? "gerando…" : "sem capa"}
-                </span>
-                <span className="flex-1 min-w-0">
-                  <span className="block truncate text-sm">{m.name}</span>
-                  <span className="text-xs text-muted">
-                    {m.kind === "video" ? "Vídeo · imagem inicial: " : "Imagem · "}
-                    {cover ? `${cover.name}${size ? ` (${size.w}×${size.h})` : ""}` : job && job !== "working" && job !== "done" ? <span className="neg">{job}</span> : "gerando a partir do vídeo…"}
-                  </span>
-                </span>
-                {m.kind === "video" && (
-                  <select className="select !h-8 !w-40 text-xs" value="" aria-label={`Trocar a capa de ${m.name}`}
-                    onChange={(e) => e.target.value && setK({ covers: { ...d.catalog.covers, [m.id]: e.target.value } })}>
-                    <option value="">Trocar capa…</option>
-                    {images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-                  </select>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted">Escolha os criativos acima: cada um vira um produto.</p>
-      )}
+      <span className="label !mb-0">Catálogo</span>
+
+      <div className="grid gap-2">
+        <span className="text-sm font-semibold">Imagem do produto <span className="text-xs text-muted font-normal">(fica salva como padrão)</span></span>
+        {productImage && !picking ? (
+          <div className="flex items-center gap-3">
+            <img src={productImage.public_url} alt="" className="w-16 h-16 rounded-lg object-cover bg-surface-2" />
+            <span className="flex-1 min-w-0 text-sm">
+              <span className="block truncate">{productImage.name}</span>
+              <span className="text-xs text-muted">{size ? `${size.w}×${size.h} · ` : ""}vai em todos os produtos; os vídeos escolhidos entram junto</span>
+            </span>
+            <button type="button" className="btn btn-sm" onClick={() => setPicking(true)}>Trocar</button>
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <MediaUploader compact onUploaded={(m) => { onUploaded(m); if (m.kind === "image") { onProductImage(m.id); setPicking(false); } }} />
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[220px] overflow-y-auto pr-1">
+              {images.map((m) => (
+                <button key={m.id} type="button" className="media-tile" aria-pressed={m.id === d.catalog.productImageId} title={m.name}
+                  onClick={() => { onProductImage(m.id); setPicking(false); }}>
+                  <img src={m.public_url} alt={m.name} loading="lazy" />
+                </button>
+              ))}
+            </div>
+            {!images.length && <span className="text-xs text-muted">Envie a imagem do seu produto acima.</span>}
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-muted">
+        {chosen.length
+          ? `${chosen.length} criativo(s) escolhido(s) acima: cada um vira ${d.catalog.productsPerCreative > 1 ? `${d.catalog.productsPerCreative} produtos` : "um produto"} com a imagem acima${hasVideo ? " e o vídeo" : ""}.`
+          : "Escolha os vídeos acima: cada um vira um produto com a imagem padrão e o vídeo."}
+      </p>
 
       <div>
         <span className="label">Anúncios no conjunto</span>

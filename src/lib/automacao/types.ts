@@ -133,19 +133,16 @@ export interface CatalogAuto {
   delayMinutes: number;
   price: number | null;
   brand: string;
-  /** capa escolhida para cada vídeo (id do vídeo → id da imagem na biblioteca) */
-  covers: Record<string, string>;
+  /** imagem do produto (biblioteca), salva como padrão: vai em todos os produtos; os vídeos entram no campo de vídeo */
+  productImageId: string;
   /** single = um anúncio com todos os produtos · per_creative = um anúncio por criativo, no mesmo conjunto */
   adsMode: "single" | "per_creative";
   /** mídia dinâmica da Meta: mostra o vídeo do produto quando houver */
   preferVideo: boolean;
 }
 
-/** Nome-base que liga um vídeo à sua capa: "promo.mp4" ↔ "promo.jpg" ou "promo-capa.jpg". */
-export const coverBase = (name: string) => name.replace(/\.[a-z0-9]+$/i, "").replace(/-capa$/i, "").toLowerCase();
-
 /** Preferências do catálogo automático reaproveitadas nas próximas campanhas. */
-export type CatalogPrefs = Partial<Pick<CatalogAuto, "productsPerCreative" | "delayMinutes" | "price" | "brand" | "adsMode" | "preferVideo">> & { catalogFormat?: string };
+export type CatalogPrefs = Partial<Pick<CatalogAuto, "productsPerCreative" | "delayMinutes" | "price" | "brand" | "adsMode" | "preferVideo" | "productImageId">> & { catalogFormat?: string };
 
 export interface DraftData {
   accountId: string;
@@ -176,6 +173,8 @@ export interface DraftData {
     endTime: string;
     ageMin: number;
     ageMax: number;
+    /** Público Advantage+: idade mínima obrigatória (a Meta só aceita 18 a 25); ageMin/ageMax viram sugestão */
+    ageMinControl: number;
     genders: "all" | "male" | "female";
     countries: string[];
     regions: Region[];
@@ -236,6 +235,7 @@ export function emptyDraft(accountId = ""): DraftData {
       endTime: "",
       ageMin: 18,
       ageMax: 65,
+      ageMinControl: 18,
       genders: "all",
       countries: ["BR"],
       regions: [],
@@ -263,7 +263,7 @@ export function emptyDraft(accountId = ""): DraftData {
       catalogFormat: "carousel_images_multi_items",
       adName: "{midia}",
     },
-    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", covers: {}, adsMode: "single", preferVideo: true },
+    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", adsMode: "single", preferVideo: true },
   };
 }
 
@@ -310,12 +310,15 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
   if (a.startTime && a.endTime && a.endTime <= a.startTime) e[2].push("O término precisa ser depois do início.");
   if (!a.countries.length && !a.regions.length) e[2].push("Escolha pelo menos um país ou região.");
   if (a.ageMin < 13 || a.ageMax > 65 || a.ageMin > a.ageMax) e[2].push("Faixa de idade inválida (13 a 65).");
+  if (a.advantageAudience && (a.ageMinControl < 18 || a.ageMinControl > 25)) e[2].push("Com Público Advantage+, a idade mínima obrigatória vai de 18 a 25 (regra da Meta). Idades maiores entram como sugestão.");
+  if (a.advantageAudience && a.ageMin < 18) e[2].push("Com Público Advantage+, a sugestão de idade começa em 18.");
   if (a.placements === "manual" && !a.platforms.length) e[2].push("Escolha pelo menos uma plataforma.");
   if (catalog && !autoCatalog && !a.productSetId) e[2].push("Escolha o conjunto de produtos do catálogo.");
 
   if (!cr.pageId) e[3].push("Escolha a Página do Facebook.");
   if ((!catalog || autoCatalog) && !cr.mediaIds.length) e[3].push(autoCatalog ? "Escolha os criativos dos produtos." : "Escolha pelo menos uma imagem ou vídeo.");
   if (autoCatalog) {
+    if (!d.catalog.productImageId) e[3].push("Escolha a imagem do produto (fica salva como padrão para os próximos catálogos).");
     if (!(Number(d.catalog.price) > 0)) e[3].push("Informe o preço dos produtos (em Configurações avançadas do catálogo).");
     if (!(d.catalog.productsPerCreative >= 1 && d.catalog.productsPerCreative <= 10)) e[3].push("Produtos por criativo: de 1 a 10.");
     if (d.catalog.delayMinutes < 0) e[3].push("Tempo de atualização do vídeo inválido.");

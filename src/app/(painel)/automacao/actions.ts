@@ -2,7 +2,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
-import { db, setSetting } from "@/lib/db";
+import { db, getSetting, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
 import { accountBusiness, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
@@ -66,8 +66,8 @@ export async function publishDraftAction(id: string, data: DraftData): Promise<{
     const r = await publishDraft(id);
     if (r.errors?.length) return { errors: r.errors };
     if (data.creative.mode === "catalog" && data.catalog.source === "auto") {
-      const { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo } = data.catalog;
-      await setSetting("catalog_prefs", { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo, catalogFormat: data.creative.catalogFormat }).catch(() => {});
+      const { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo, productImageId } = data.catalog;
+      await setSetting("catalog_prefs", { productsPerCreative, delayMinutes, price, brand, adsMode, preferVideo, productImageId, catalogFormat: data.creative.catalogFormat }).catch(() => {});
     }
     revalidatePath("/automacao");
     return { runId: r.runId, runIds: r.runIds };
@@ -165,6 +165,13 @@ export async function createCatalogAction(formData: FormData) {
     go(back, "erro", `A Meta não criou o catálogo: ${e?.message ?? "sem permissão"}. Confira se o perfil tem catalog_management e é admin do BM.`);
   }
   go(`/automacao/catalogos/${id}?perfil=${profile}`, "ok", "Catálogo criado.");
+}
+
+/** Salva a imagem padrão do produto assim que é escolhida (usada em todos os próximos catálogos). */
+export async function saveProductImageAction(mediaId: string) {
+  await requireAuth();
+  const cur = await getSetting<Record<string, unknown>>("catalog_prefs", {});
+  await setSetting("catalog_prefs", { ...cur, productImageId: mediaId });
 }
 
 /** Cria o catálogo no Business Manager dono da conta de anúncio (botão do assistente de criação). */

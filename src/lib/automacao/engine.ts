@@ -2,7 +2,7 @@ import "server-only";
 import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile } from "../profiles";
 import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
-import { getMediaMany, resolveCovers, type MediaAsset } from "./media";
+import { getMedia, getMediaMany, type MediaAsset } from "./media";
 import { normalizeDraft, validateDraft, type DraftData } from "./types";
 import { createRun, kick, retryRun, tick, type JobSpec } from "./queue";
 import "./executors"; // registra o que cada operação faz
@@ -69,10 +69,8 @@ export async function checkBeforePublish(d: DraftData): Promise<string[]> {
     if (media.length !== d.creative.mediaIds.length) errors.push("Alguma mídia escolhida foi excluída da biblioteca.");
     if (media.some((m) => m.status !== "ready")) errors.push("Alguma mídia ainda não terminou de enviar.");
     if (autoCatalog) {
-      const videos = media.filter((m) => m.kind === "video");
-      const covers = await resolveCovers(videos, d.catalog.covers);
-      const missing = videos.filter((v) => !covers[v.id]);
-      if (missing.length) errors.push(`Falta a imagem de capa de: ${missing.map((v) => v.name).join(", ")}. Abra a etapa Criativos para gerar.`);
+      const img = await getMedia(d.catalog.productImageId);
+      if (!img || img.kind !== "image" || img.status !== "ready") errors.push("A imagem do produto não está na biblioteca (foi excluída?). Escolha outra na etapa Criativos.");
     }
     if (autoCatalog && profile) {
       const bm = await accountBusiness(authOf(profile), d.accountId).catch(() => undefined);
@@ -89,10 +87,11 @@ export interface AutoProduct {
   mediaId: string;
 }
 
-/** Um produto por criativo (ou mais, se pedido). Vídeo: a capa é a imagem do produto. */
+/** Um produto por criativo (ou mais, se pedido): imagem = a imagem padrão do produto; vídeo no campo de vídeo. */
 async function autoProducts(d: DraftData, draftId: string): Promise<{ products: AutoProduct[]; videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] }> {
   const media = await getMediaMany(d.creative.mediaIds);
-  const covers = await resolveCovers(media.filter((m) => m.kind === "video"), d.catalog.covers);
+  const productImage = await getMedia(d.catalog.productImageId);
+  if (!productImage) throw new Error("Imagem do produto não encontrada na biblioteca.");
   const { data: acc } = await db().from("ad_accounts").select("currency").eq("id", d.accountId).maybeSingle();
   const { data: page } = await db().from("fb_pages").select("name").eq("page_id", d.creative.pageId).maybeSingle();
   const currency = acc?.currency ?? "BRL";
@@ -102,8 +101,7 @@ async function autoProducts(d: DraftData, draftId: string): Promise<{ products: 
   const products: AutoProduct[] = [];
   const videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] = [];
   for (const m of media) {
-    const cover = m.kind === "video" ? covers[m.id] : m;
-    if (!cover) continue;
+    const cover = m.kind === "video" ? productImage : m;
     const ids: string[] = [];
     for (let n = 1; n <= per; n++) {
       // ID estável: publicar de novo atualiza o mesmo produto em vez de duplicar
