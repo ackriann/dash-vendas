@@ -111,6 +111,11 @@ export const PLATFORMS: [string, string][] = [
 ];
 
 /** Como o catálogo aparece no anúncio (template_data.format_option da Meta). */
+/** Textos neutros usados se o operador não preencher título e descrição.
+ * Não usar macros de nome/preço do catálogo por padrão no anúncio. */
+export const CATALOG_DEFAULT_HEADLINE = "Saiba mais";
+export const CATALOG_DEFAULT_DESCRIPTION = "Veja os detalhes";
+
 export const CATALOG_FORMATS: [string, string][] = [
   ["carousel_images_multi_items", "Carrossel com vários produtos"],
   ["carousel_images_single_item", "Carrossel com as imagens de um produto"],
