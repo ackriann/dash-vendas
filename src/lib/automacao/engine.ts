@@ -238,10 +238,21 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
     });
   }
-  // O prazo começa após a criação dos anúncios, não após a aprovação.
-  // O acompanhamento de revisão da Meta continua na operação seguinte.
-  if (videoSchedule) jobs.push(videoSchedule);
-  jobs.push({ key: "review", kind: "review", label: "Publicação na Meta (revisão dos anúncios)" });
+  // Quando há vídeo agendado, confirma primeiro que os anúncios já foram
+  // criados na Meta. O delay não espera pela aprovação/revisão publicitária.
+  if (videoSchedule) {
+    jobs.push({
+      key: "publish_confirm",
+      kind: "publish_confirm",
+      label: "Publicação na Meta (anúncios criados)",
+    });
+    jobs.push(videoSchedule);
+  }
+  jobs.push({
+    key: "review",
+    kind: "review",
+    label: videoSchedule ? "Acompanhamento da revisão da Meta" : "Publicação na Meta (revisão dos anúncios)",
+  });
   return jobs;
 }
 
