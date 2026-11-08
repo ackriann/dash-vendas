@@ -102,6 +102,38 @@ export async function listProducts(auth: MetaAuth, catalogId: string, maxPages =
   return graphAll<ProductItem>(`${catalogId}/products`, { fields: PRODUCT_FIELDS, limit: 100 }, auth, maxPages);
 }
 
+/** Produtos do catálogo com esses retailer_id (filtro da própria API, sem varrer o catálogo inteiro). */
+export async function listProductsByRetailer(auth: MetaAuth, catalogId: string, retailerIds: string[]): Promise<ProductItem[]> {
+  const out: ProductItem[] = [];
+  for (let i = 0; i < retailerIds.length; i += 100) {
+    const chunk = retailerIds.slice(i, i + 100);
+    out.push(...(await graphAll<ProductItem>(`${catalogId}/products`, {
+      fields: PRODUCT_FIELDS,
+      limit: 100,
+      filter: JSON.stringify({ retailer_id: { is_any: chunk } }),
+    }, auth, 2)));
+  }
+  return out;
+}
+
+/** Conjunto de produtos com exatamente esses retailer_id. */
+export async function createProductSet(auth: MetaAuth, catalogId: string, name: string, retailerIds: string[]) {
+  return graph<{ id: string }>(`${catalogId}/product_sets`, {
+    method: "POST",
+    params: { name, filter: JSON.stringify({ retailer_id: { is_any: retailerIds } }) },
+    auth,
+  });
+}
+
+/** Liga o pixel ao catálogo (eventos do site casam com os produtos). */
+export async function linkPixelToCatalog(auth: MetaAuth, catalogId: string, pixelId: string) {
+  return graph<{ success?: boolean }>(`${catalogId}/external_event_sources`, {
+    method: "POST",
+    params: { external_event_sources: JSON.stringify([pixelId]) },
+    auth,
+  });
+}
+
 export async function getProduct(auth: MetaAuth, productId: string): Promise<ProductItem> {
   return graph<ProductItem>(productId, { params: { fields: PRODUCT_FIELDS }, auth });
 }

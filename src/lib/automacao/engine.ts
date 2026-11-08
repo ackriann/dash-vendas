@@ -2,7 +2,7 @@ import "server-only";
 import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile } from "../profiles";
 import { accountInfo, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
-import { getMediaMany } from "./media";
+import { getMediaMany, resolveCovers, type MediaAsset } from "./media";
 import { normalizeDraft, validateDraft, type DraftData } from "./types";
 import { createRun, kick, retryRun, tick, type JobSpec } from "./queue";
 import "./executors"; // registra o que cada operação faz
@@ -63,19 +63,92 @@ export async function checkBeforePublish(d: DraftData): Promise<string[]> {
   if (page?.tasks?.length && !page.tasks.includes("ADVERTISE") && !page.tasks.includes("MANAGE")) {
     errors.push(`Seu perfil não tem permissão de anunciar com a Página ${page.name}.`);
   }
-  if (d.creative.mode === "media") {
+  const autoCatalog = d.creative.mode === "catalog" && d.catalog.source === "auto";
+  if (d.creative.mode === "media" || autoCatalog) {
     const media = await getMediaMany(d.creative.mediaIds);
     if (media.length !== d.creative.mediaIds.length) errors.push("Alguma mídia escolhida foi excluída da biblioteca.");
     if (media.some((m) => m.status !== "ready")) errors.push("Alguma mídia ainda não terminou de enviar.");
+    if (autoCatalog) {
+      const videos = media.filter((m) => m.kind === "video");
+      const covers = await resolveCovers(videos, d.catalog.covers);
+      const missing = videos.filter((v) => !covers[v.id]);
+      if (missing.length) errors.push(`Falta a imagem de capa de: ${missing.map((v) => v.name).join(", ")}. Abra a etapa Criativos para gerar.`);
+    }
+    if (autoCatalog && profile) {
+      const info = await accountInfo(authOf(profile), d.accountId).catch(() => null);
+      if (info && !info.business?.id) errors.push(`A conta ${acc.name} não está em um Business Manager; o catálogo automático precisa de um BM.`);
+    }
   }
   return errors;
 }
 
-async function publishJobs(d: DraftData): Promise<JobSpec[]> {
-  const jobs: JobSpec[] = [
+export interface AutoProduct {
+  retailerId: string;
+  name: string;
+  data: Record<string, unknown>;
+  mediaId: string;
+}
+
+/** Um produto por criativo (ou mais, se pedido). Vídeo: a capa é a imagem do produto. */
+async function autoProducts(d: DraftData, draftId: string): Promise<{ products: AutoProduct[]; videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] }> {
+  const media = await getMediaMany(d.creative.mediaIds);
+  const covers = await resolveCovers(media.filter((m) => m.kind === "video"), d.catalog.covers);
+  const { data: acc } = await db().from("ad_accounts").select("currency").eq("id", d.accountId).maybeSingle();
+  const { data: page } = await db().from("fb_pages").select("name").eq("page_id", d.creative.pageId).maybeSingle();
+  const currency = acc?.currency ?? "BRL";
+  const title = (d.creative.headline || d.campaign.name).slice(0, 150);
+  const per = Math.min(10, Math.max(1, Math.round(d.catalog.productsPerCreative || 1)));
+  const delayed = d.catalog.delayMinutes > 0;
+  const products: AutoProduct[] = [];
+  const videos: { video: MediaAsset; cover: MediaAsset; retailerIds: string[] }[] = [];
+  for (const m of media) {
+    const cover = m.kind === "video" ? covers[m.id] : m;
+    if (!cover) continue;
+    const ids: string[] = [];
+    for (let n = 1; n <= per; n++) {
+      // ID estável: publicar de novo atualiza o mesmo produto em vez de duplicar
+      const retailerId = `pv_${draftId.slice(0, 8)}_${m.id.slice(0, 8)}_${n}`;
+      ids.push(retailerId);
+      products.push({
+        retailerId,
+        mediaId: m.id,
+        name: per > 1 ? `${title} ${n}` : title,
+        data: {
+          title: per > 1 ? `${title} ${n}` : title,
+          description: (d.creative.description || d.creative.message || title).slice(0, 5000),
+          availability: "in stock",
+          condition: "new",
+          price: `${Number(d.catalog.price).toFixed(2)} ${currency}`,
+          link: d.creative.url,
+          brand: (d.catalog.brand || page?.name || d.campaign.name).slice(0, 100),
+          image_link: cover.public_url,
+          ...(m.kind === "video" && !delayed ? { video: [{ url: m.public_url }] } : {}),
+        },
+      });
+    }
+    if (m.kind === "video" && delayed) videos.push({ video: m, cover, retailerIds: ids });
+  }
+  return { products, videos };
+}
+
+async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
+  const jobs: JobSpec[] = [];
+  const autoCatalog = d.creative.mode === "catalog" && d.catalog.source === "auto";
+  let delayedVideos: Awaited<ReturnType<typeof autoProducts>>["videos"] = [];
+  if (autoCatalog) {
+    const { products, videos } = await autoProducts(d, draftId);
+    delayedVideos = videos;
+    jobs.push(
+      { key: "catalog", kind: "catalog_auto", label: "Catálogo do Business Manager (identifica ou cria)" },
+      { key: "products", kind: "catalog_products", label: `Criação de ${products.length} produto(s) em lote`, input: { products } },
+      { key: "check", kind: "catalog_check", label: "Processamento dos produtos pela Meta", input: { publish: true } },
+      { key: "product_set", kind: "product_set", label: "Conjunto de produtos da campanha", input: { retailerIds: products.map((p) => p.retailerId) } },
+    );
+  }
+  jobs.push(
     { key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` },
     { key: "adset", kind: "adset", label: `Criação do conjunto · ${d.adset.name}` },
-  ];
+  );
   if (d.creative.mode === "catalog") {
     const adName = adNameFor(d.creative.adName.replace("{midia}", "Catálogo"), 1, null, 1);
     jobs.push({ key: "creative:1", kind: "creative", label: `Criativo de catálogo`, input: { adName } });
@@ -88,6 +161,17 @@ async function publishJobs(d: DraftData): Promise<JobSpec[]> {
       const adName = adNameFor(d.creative.adName, n, m.name, media.length);
       jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo · ${adName}`, input: { adName, mediaKey: `media:${m.id}` } });
       jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
+    });
+  }
+  if (delayedVideos.length) {
+    jobs.push({
+      key: "video_schedule",
+      kind: "catalog_video_schedule",
+      label: `Agendamento do vídeo nos produtos (em ${d.catalog.delayMinutes} min)`,
+      input: {
+        delayMinutes: d.catalog.delayMinutes,
+        videos: delayedVideos.map((v) => ({ videoId: v.video.id, videoName: v.video.name, coverId: v.cover.id, retailerIds: v.retailerIds })),
+      },
     });
   }
   jobs.push({ key: "review", kind: "review", label: "Publicação na Meta (revisão dos anúncios)" });
@@ -156,7 +240,14 @@ export async function checkAccount(d: DraftData, accountId: string, main: { curr
     }
   }
 
-  if (d.creative.mode === "catalog" && d.campaign.catalogId) {
+  if (d.creative.mode === "catalog" && d.catalog.source === "auto") {
+    if (c.business) c.catalog = { status: "ok", note: `Catálogo automático do BM ${c.business.name}` };
+    else {
+      c.catalog = { status: "error", note: "Conta sem BM" };
+      c.errors.push("A conta não está em um Business Manager; o catálogo automático precisa de um BM.");
+    }
+  }
+  if (d.creative.mode === "catalog" && d.catalog.source === "existing" && d.campaign.catalogId) {
     const catalogs = await listAccountCatalogs(auth, accountId).catch(() => []);
     if (catalogs.some((x) => x.id === d.campaign.catalogId)) c.catalog = { status: "ok", note: "Mesmo catálogo (está no BM da conta)" };
     else {
@@ -242,7 +333,7 @@ export async function publishDraft(draftId: string): Promise<{ runId: string; ru
 }
 
 async function publishOne(draftId: string, d: DraftData, idemKey: string, title: string): Promise<string> {
-  const jobs = await publishJobs(d);
+  const jobs = await publishJobs(d, draftId);
   const { data: prev } = await db().from("ops_runs").select("id,status,summary").eq("idem_key", idemKey).maybeSingle();
 
   if (prev) {

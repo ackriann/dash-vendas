@@ -1,11 +1,12 @@
 import "server-only";
-import { db } from "../db";
+import { db, getSetting, setSetting } from "../db";
 import { startOfDayUtc } from "../dates";
 import { MetaError, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
-  adsVolume, batchStatus, createIn, findRecentByName, getEffectiveStatus, itemsBatch, listProducts, pageDetails, promotePages,
+  accountInfo, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
+  linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
 } from "./meta-ads";
 import { ensureOnAccount, getMedia, type MediaAsset } from "./media";
 import { onRunFinished, registerExecutor, type ExecCtx, type Outcome } from "./queue";
@@ -19,7 +20,10 @@ const cents = (v: number | null | undefined) => Math.round(Number(v || 0) * 100)
 function draftOf(ctx: ExecCtx): DraftData {
   const d = ctx.run.summary?.draft as DraftData | undefined;
   if (!d) throw new Error("Processo sem a configuração da campanha.");
-  return d;
+  // Catálogo automático: catálogo e conjunto de produtos vêm das operações anteriores
+  const catalogId = d.campaign.catalogId || ctx.done.catalog?.id || "";
+  const productSetId = d.adset.productSetId || ctx.done.product_set?.id || "";
+  return { ...d, campaign: { ...d.campaign, catalogId }, adset: { ...d.adset, productSetId } };
 }
 
 async function accountTz(act: string): Promise<string> {
@@ -392,21 +396,28 @@ registerExecutor("catalog_item", async (ctx) => {
 
 /** Espera a Meta processar os lotes e lê o status de revisão de cada produto. */
 registerExecutor("catalog_check", async (ctx): Promise<Outcome> => {
-  const { profileId, catalogId, scheduleId } = ctx.job.input as { profileId: string; catalogId: string; scheduleId?: string | null };
-  const auth = await profileAuth(profileId);
-  const items = Object.entries(ctx.done).filter(([k]) => k.startsWith("item:")).map(([, v]) => v as { handle: string | null; logId: number; retailerId: string });
+  const input = ctx.job.input as { profileId?: string; catalogId?: string; scheduleId?: string | null; publish?: boolean };
+  const scheduleId = input.scheduleId;
+  // Na publicação com catálogo automático, catálogo e conta vêm do próprio processo
+  const catalogId = input.catalogId || ctx.done.catalog?.id;
+  if (!catalogId) throw new Error("O catálogo ainda não foi identificado.");
+  const auth = input.profileId ? await profileAuth(input.profileId) : await authForAccount(draftOf(ctx).accountId);
+  type Item = { handle: string | null; logId: number; retailerId: string };
+  const items: Item[] = Object.entries(ctx.done)
+    .filter(([k]) => k.startsWith("item:") || k === "products")
+    .flatMap(([, v]) => (Array.isArray(v.items) ? (v.items as Item[]).map((i) => ({ ...i, handle: v.handle ?? null })) : [v as Item]));
 
   const errorsByRetailer: Record<string, string> = {};
-  for (const it of items) {
-    if (!it.handle) continue;
-    const st = await batchStatus(auth, catalogId, it.handle);
+  const handles = new Map(items.filter((i) => i.handle).map((i) => [i.handle!, i]));
+  for (const it of handles.values()) {
+    const st = await batchStatus(auth, catalogId, it.handle!);
     if (st.status && st.status !== "finished" && st.status !== "error" && st.status !== "canceled") {
       return { status: "waiting_sync", delayMs: 15_000, message: "A Meta está processando o lote do catálogo", maxPolls: 40 };
     }
     for (const er of st.errors ?? []) errorsByRetailer[er.id ?? it.retailerId] = er.message ?? "erro";
   }
 
-  const products = await listProducts(auth, catalogId, 3).catch(() => []);
+  const products = await listProductsByRetailer(auth, catalogId, items.map((i) => i.retailerId)).catch(() => []);
   let synced = 0;
   let rejected = 0;
   for (const it of items) {
@@ -431,11 +442,137 @@ registerExecutor("catalog_check", async (ctx): Promise<Outcome> => {
     await db().from("catalog_schedules").update({ active: false, last_result: `Pausada: ${rejected} produto(s) reprovado(s) na revisão da Meta` }).eq("id", scheduleId);
   }
   const pendingReview = items.length - synced - rejected - Object.keys(errorsByRetailer).length;
+  if (input.publish && items.length && synced + pendingReview === 0) {
+    throw new MetaError(`Nenhum produto foi aceito pela Meta: ${Object.values(errorsByRetailer)[0] ?? "reprovados na revisão"}. Confira preço, link e imagem.`);
+  }
   return {
     status: "done",
     result: { synced, rejected, errors: Object.keys(errorsByRetailer).length },
     message: `${synced} sincronizado(s)${pendingReview > 0 ? ` · ${pendingReview} em revisão` : ""}${rejected ? ` · ${rejected} reprovado(s)` : ""}${Object.keys(errorsByRetailer).length ? ` · ${Object.keys(errorsByRetailer).length} com erro` : ""}`,
   };
+});
+
+// ------------------------------------------------------------- Catálogo automático (publicação)
+
+export const AUTO_CATALOG_NAME = "Painel de Vendas · Catálogo automático";
+
+/** Acha o catálogo automático do BM da conta (ou cria um, uma vez só por BM). */
+registerExecutor("catalog_auto", async (ctx) => {
+  const d = draftOf(ctx);
+  const auth = await authForAccount(d.accountId);
+  const info = await accountInfo(auth, d.accountId);
+  const bm = info.business;
+  if (!bm?.id) throw new MetaError("A conta de anúncio não está em um Business Manager; o catálogo automático precisa de um BM.");
+
+  const saved = await getSetting<Record<string, string>>("auto_catalogs", {});
+  const list = await listBusinessCatalogs(auth, bm.id);
+  let cat = list.find((c) => c.id === saved[bm.id]) ?? list.find((c) => c.name === AUTO_CATALOG_NAME);
+  let created = false;
+  if (!cat) {
+    const r = await createCatalog(auth, bm.id, AUTO_CATALOG_NAME);
+    cat = { id: r.id, name: AUTO_CATALOG_NAME };
+    created = true;
+  }
+  if (saved[bm.id] !== cat.id) await setSetting("auto_catalogs", { ...saved, [bm.id]: cat.id });
+
+  let pixelNote = "";
+  if (d.adset.pixelId) {
+    try {
+      await linkPixelToCatalog(auth, cat.id, d.adset.pixelId);
+      pixelNote = " · pixel ligado ao catálogo";
+    } catch (e: any) {
+      pixelNote = ` · pixel não ligado (${e?.message ?? "sem permissão"})`;
+    }
+  }
+  return {
+    status: "done",
+    metaId: cat.id,
+    result: { id: cat.id, name: cat.name, business_id: bm.id, created },
+    message: `${created ? "Catálogo criado" : "Catálogo reaproveitado"}: ${cat.name} (BM ${bm.name})${pixelNote}`,
+  };
+});
+
+/** Cria (ou atualiza, com o mesmo ID) todos os produtos da campanha num lote só. */
+registerExecutor("catalog_products", async (ctx) => {
+  const d = draftOf(ctx);
+  const catalogId = ctx.done.catalog?.id;
+  if (!catalogId) throw new Error("O catálogo ainda não foi identificado.");
+  const products = (ctx.job.input.products ?? []) as { retailerId: string; name: string; data: Record<string, unknown>; mediaId: string }[];
+  if (!products.length) throw new Error("Nenhum produto para criar (faltam as capas dos vídeos?).");
+  const auth = await authForAccount(d.accountId);
+  const r = await itemsBatch(auth, catalogId, products.map((p) => ({ method: "CREATE" as const, data: { id: p.retailerId, ...p.data } })));
+
+  // Histórico do catálogo (mesma tela das atualizações manuais)
+  const { data: logs } = await db()
+    .from("catalog_update_logs")
+    .insert(products.map((p) => ({
+      run_id: ctx.run.id,
+      catalog_id: catalogId,
+      retailer_id: p.retailerId,
+      product_name: p.name,
+      current_media: { image_url: p.data.image_link, videos: ((p.data.video as { url: string }[] | undefined) ?? []).map((v) => v.url), media_id: p.mediaId },
+      meta_response: r,
+      sync_status: "waiting",
+    })))
+    .select("id,retailer_id");
+  const items = products.map((p) => ({ retailerId: p.retailerId, logId: (logs ?? []).find((l: any) => l.retailer_id === p.retailerId)?.id ?? null }));
+  return { status: "done", result: { handle: r.handles?.[0] ?? null, items }, message: `${products.length} produto(s) enviados ao catálogo` };
+});
+
+/** Conjunto de produtos só com os produtos desta campanha (reaproveita se já existir). */
+registerExecutor("product_set", async (ctx) => {
+  const d = draftOf(ctx);
+  const catalogId = ctx.done.catalog?.id;
+  if (!catalogId) throw new Error("O catálogo ainda não foi identificado.");
+  const ids = (ctx.job.input.retailerIds ?? []) as string[];
+  const auth = await authForAccount(d.accountId);
+  const name = `${d.campaign.name.trim()} · ${(ctx.run.ref_id ?? ctx.run.id).slice(0, 8)}`.slice(0, 200);
+  const found = (await listProductSets(auth, catalogId).catch(() => [])).find((x) => x.name === name);
+  const id = found?.id ?? (await createProductSet(auth, catalogId, name, ids)).id;
+  return { status: "done", metaId: id, result: { id, name }, message: `${found ? "Conjunto de produtos reaproveitado" : "Conjunto de produtos criado"}: ${name}` };
+});
+
+/**
+ * Catálogo com atraso: os produtos nascem com a capa e o vídeo entra no horário
+ * marcado, pela mesma automação de mídias dos catálogos (set_media). A
+ * atualização passa pela revisão normal da Meta.
+ */
+registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
+  const d = draftOf(ctx);
+  const catalogId = ctx.done.catalog?.id;
+  if (!catalogId) throw new Error("O catálogo ainda não foi identificado.");
+  const input = ctx.job.input as { delayMinutes: number; videos: { videoId: string; videoName: string; coverId: string; retailerIds: string[] }[] };
+  const auth = await authForAccount(d.accountId);
+  const { data: acc } = await db().from("ad_accounts").select("profile_id").eq("id", d.accountId).maybeSingle();
+  if (!acc?.profile_id) throw new Error("Conta sem perfil Meta.");
+  const all = input.videos.flatMap((v) => v.retailerIds);
+  const products = await listProductsByRetailer(auth, catalogId, all);
+  if (products.length < all.length) {
+    return { status: "waiting_sync", delayMs: 15_000, message: `A Meta ainda está registrando os produtos (${products.length}/${all.length})`, maxPolls: 40 };
+  }
+  const start = new Date(Date.now() + input.delayMinutes * 60000).toISOString();
+  let made = 0;
+  for (const v of input.videos) {
+    const name = `${d.campaign.name.trim()} · vídeo ${v.videoName}`.slice(0, 200);
+    const { data: exists } = await db().from("catalog_schedules").select("id").eq("catalog_id", catalogId).eq("name", name).maybeSingle();
+    if (exists) continue;
+    const { error } = await db().from("catalog_schedules").insert({
+      name,
+      profile_id: acc.profile_id,
+      catalog_id: catalogId,
+      catalog_name: ctx.done.catalog?.name ?? null,
+      product_ids: products.filter((p) => v.retailerIds.includes(p.retailer_id)).map((p) => p.id),
+      media_ids: [v.coverId, v.videoId],
+      update_type: "set_media",
+      interval_minutes: Math.max(15, input.delayMinutes),
+      start_at: start,
+      next_run_at: start,
+      active: true,
+    });
+    if (error) throw new Error(error.message);
+    made++;
+  }
+  return { status: "done", result: { start, schedules: made }, message: `Vídeo entra nos produtos em ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })}` };
 });
 
 onRunFinished("catalog_update", async (run) => {

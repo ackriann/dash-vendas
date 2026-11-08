@@ -2,7 +2,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
-import { db } from "@/lib/db";
+import { db, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
 import { accountInfo, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
@@ -65,6 +65,10 @@ export async function publishDraftAction(id: string, data: DraftData): Promise<{
   try {
     const r = await publishDraft(id);
     if (r.errors?.length) return { errors: r.errors };
+    if (data.creative.mode === "catalog" && data.catalog.source === "auto") {
+      const { productsPerCreative, delayMinutes, price, brand } = data.catalog;
+      await setSetting("catalog_prefs", { productsPerCreative, delayMinutes, price, brand, catalogFormat: data.creative.catalogFormat }).catch(() => {});
+    }
     revalidatePath("/automacao");
     return { runId: r.runId, runIds: r.runIds };
   } catch (e: any) {

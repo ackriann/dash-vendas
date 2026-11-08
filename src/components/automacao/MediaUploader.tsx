@@ -4,6 +4,37 @@ import type { MediaLite } from "@/lib/automacao/types";
 
 type Item = { name: string; pct: number; error?: string };
 
+/** Envia um arquivo para a biblioteca: o navegador manda direto ao armazenamento pela URL assinada. */
+export async function uploadMedia(file: File, onPct?: (pct: number) => void): Promise<MediaLite> {
+  const start = await fetch("/api/automacao/midias", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: file.name, mime: file.type, size: file.size }),
+  }).then((r) => r.json());
+  if (start.error) throw new Error(start.error);
+
+  await new Promise<void>((ok, fail) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", start.uploadUrl);
+    xhr.setRequestHeader("x-upsert", "false");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onPct?.(Math.round((e.loaded / e.total) * 95));
+    xhr.onload = () => (xhr.status < 300 ? ok() : fail(new Error(`Falha no envio (HTTP ${xhr.status})`)));
+    xhr.onerror = () => fail(new Error("Conexão caiu durante o envio."));
+    const body = new FormData();
+    body.append("cacheControl", "3600");
+    body.append("", file);
+    xhr.send(body);
+  });
+
+  const done = await fetch("/api/automacao/midias", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: start.asset.id }),
+  }).then((r) => r.json());
+  if (done.error) throw new Error(done.error);
+  return { id: done.asset.id, kind: done.asset.kind, name: done.asset.name, public_url: done.asset.public_url };
+}
+
 /**
  * Envio de imagens e vídeos para a biblioteca. O arquivo vai direto do navegador
  * para o armazenamento (URL assinada), sem passar pelo limite de tamanho do servidor.
@@ -16,34 +47,9 @@ export default function MediaUploader({ onUploaded, compact = false }: { onUploa
   async function send(file: File, idx: number) {
     const set = (p: Partial<Item>) => setItems((list) => list.map((it, i) => (i === idx ? { ...it, ...p } : it)));
     try {
-      const start = await fetch("/api/automacao/midias", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: file.name, mime: file.type, size: file.size }),
-      }).then((r) => r.json());
-      if (start.error) throw new Error(start.error);
-
-      await new Promise<void>((ok, fail) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", start.uploadUrl);
-        xhr.setRequestHeader("x-upsert", "false");
-        xhr.upload.onprogress = (e) => e.lengthComputable && set({ pct: Math.round((e.loaded / e.total) * 95) });
-        xhr.onload = () => (xhr.status < 300 ? ok() : fail(new Error(`Falha no envio (HTTP ${xhr.status})`)));
-        xhr.onerror = () => fail(new Error("Conexão caiu durante o envio."));
-        const body = new FormData();
-        body.append("cacheControl", "3600");
-        body.append("", file);
-        xhr.send(body);
-      });
-
-      const done = await fetch("/api/automacao/midias", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: start.asset.id }),
-      }).then((r) => r.json());
-      if (done.error) throw new Error(done.error);
+      const m = await uploadMedia(file, (pct) => set({ pct }));
       set({ pct: 100 });
-      onUploaded?.({ id: done.asset.id, kind: done.asset.kind, name: done.asset.name, public_url: done.asset.public_url });
+      onUploaded?.(m);
     } catch (e: any) {
       set({ error: e?.message ?? "erro" });
     }

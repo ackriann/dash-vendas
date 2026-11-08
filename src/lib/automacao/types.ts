@@ -121,6 +121,28 @@ export const CATALOG_FORMATS: [string, string][] = [
 export interface Named { id: string; name: string }
 export interface Region { key: string; name: string; country?: string }
 
+/**
+ * Catálogo automático: o painel acha ou cria o catálogo do BM da conta, cria um
+ * produto por criativo (com a capa como imagem) e o conjunto de produtos.
+ */
+export interface CatalogAuto {
+  /** auto = o painel monta tudo · existing = catálogo e conjunto de produtos escolhidos à mão */
+  source: "auto" | "existing";
+  productsPerCreative: number;
+  /** minutos até o vídeo entrar no produto (0 = o vídeo já vai na criação) */
+  delayMinutes: number;
+  price: number | null;
+  brand: string;
+  /** capa escolhida para cada vídeo (id do vídeo → id da imagem na biblioteca) */
+  covers: Record<string, string>;
+}
+
+/** Nome-base que liga um vídeo à sua capa: "promo.mp4" ↔ "promo.jpg" ou "promo-capa.jpg". */
+export const coverBase = (name: string) => name.replace(/\.[a-z0-9]+$/i, "").replace(/-capa$/i, "").toLowerCase();
+
+/** Preferências do catálogo automático reaproveitadas nas próximas campanhas. */
+export type CatalogPrefs = Partial<Pick<CatalogAuto, "productsPerCreative" | "delayMinutes" | "price" | "brand">> & { catalogFormat?: string };
+
 export interface DraftData {
   accountId: string;
   /** Outras contas que recebem a mesma campanha (cada uma vira um processo de publicação) */
@@ -177,6 +199,7 @@ export interface DraftData {
     catalogFormat: string;
     adName: string; // aceita {n} e {midia}
   };
+  catalog: CatalogAuto;
 }
 
 export const RECOMMENDED_URL_TAGS =
@@ -236,6 +259,7 @@ export function emptyDraft(accountId = ""): DraftData {
       catalogFormat: "carousel_images_multi_items",
       adName: "{midia}",
     },
+    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", covers: {} },
   };
 }
 
@@ -249,6 +273,8 @@ export function normalizeDraft(raw: unknown, accountId = ""): DraftData {
     campaign: { ...d.campaign, ...(r.campaign ?? {}) },
     adset: { ...d.adset, ...(r.adset ?? {}) },
     creative: { ...d.creative, ...(r.creative ?? {}) },
+    // Rascunho antigo de catálogo já tinha catálogo escolhido: continua no modo manual
+    catalog: { ...d.catalog, ...(r.catalog ?? (r.campaign?.catalogId ? { source: "existing" } : {})) },
   };
 }
 
@@ -266,7 +292,8 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
   if (!c.name.trim()) e[1].push("Dê um nome para a campanha.");
   if (c.budgetLevel === "campaign" && !(Number(c.budget) > 0)) e[1].push("Informe o orçamento da campanha.");
   if (catalog && c.objective !== "OUTCOME_SALES") e[1].push("Anúncios de catálogo usam o objetivo Vendas.");
-  if (catalog && !c.catalogId) e[1].push("Escolha o catálogo da campanha.");
+  const autoCatalog = catalog && d.catalog.source === "auto";
+  if (catalog && !autoCatalog && !c.catalogId) e[1].push("Escolha o catálogo da campanha.");
 
   if (!a.name.trim()) e[2].push("Dê um nome para o conjunto.");
   if (!GOALS[c.objective].some(([g]) => g === a.optimizationGoal)) e[2].push("Escolha uma meta de otimização compatível com o objetivo.");
@@ -280,10 +307,15 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
   if (!a.countries.length && !a.regions.length) e[2].push("Escolha pelo menos um país ou região.");
   if (a.ageMin < 13 || a.ageMax > 65 || a.ageMin > a.ageMax) e[2].push("Faixa de idade inválida (13 a 65).");
   if (a.placements === "manual" && !a.platforms.length) e[2].push("Escolha pelo menos uma plataforma.");
-  if (catalog && !a.productSetId) e[2].push("Escolha o conjunto de produtos do catálogo.");
+  if (catalog && !autoCatalog && !a.productSetId) e[2].push("Escolha o conjunto de produtos do catálogo.");
 
   if (!cr.pageId) e[3].push("Escolha a Página do Facebook.");
-  if (!catalog && !cr.mediaIds.length) e[3].push("Escolha pelo menos uma imagem ou vídeo.");
+  if ((!catalog || autoCatalog) && !cr.mediaIds.length) e[3].push(autoCatalog ? "Escolha os criativos dos produtos." : "Escolha pelo menos uma imagem ou vídeo.");
+  if (autoCatalog) {
+    if (!(Number(d.catalog.price) > 0)) e[3].push("Informe o preço dos produtos (em Configurações avançadas do catálogo).");
+    if (!(d.catalog.productsPerCreative >= 1 && d.catalog.productsPerCreative <= 10)) e[3].push("Produtos por criativo: de 1 a 10.");
+    if (d.catalog.delayMinutes < 0) e[3].push("Tempo de atualização do vídeo inválido.");
+  }
   if (!/^https?:\/\/\S+\.\S+/.test(cr.url)) e[3].push("Informe a URL de destino (com https://).");
   if (!cr.message.trim()) e[3].push("Escreva o texto principal.");
   if (cr.message.length > 2200) e[3].push("Texto principal muito longo.");

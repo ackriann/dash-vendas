@@ -2,11 +2,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import MediaUploader from "@/components/automacao/MediaUploader";
+import MediaUploader, { uploadMedia } from "@/components/automacao/MediaUploader";
 import {
   BID_STRATEGIES, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
-  RECOMMENDED_URL_TAGS, STEP_LABELS, needsBidAmount, validateDraft,
-  type AccountLite, type DraftData, type MediaLite, type Named, type PageLite, type Region,
+  RECOMMENDED_URL_TAGS, STEP_LABELS, coverBase, needsBidAmount, validateDraft,
+  type AccountLite, type CatalogAuto, type CatalogPrefs, type DraftData, type MediaLite, type Named, type PageLite, type Region,
 } from "@/lib/automacao/types";
 import { createCatalogForAccountAction, publishDraftAction, saveDraftAction } from "../actions";
 
@@ -49,7 +49,7 @@ async function api<T>(op: string, account: string, extra: Record<string, string>
 const label = (list: [string, string][], v: string) => list.find(([k]) => k === v)?.[1] ?? v;
 
 export default function Wizard({
-  draftId, initial, initialStep, accounts, pages, pagesFromSync, media: initialMedia,
+  draftId, initial, initialStep, accounts, pages, pagesFromSync, media: initialMedia, catalogPrefs = {},
 }: {
   draftId: string;
   initial: DraftData;
@@ -58,6 +58,7 @@ export default function Wizard({
   pages: PageLite[];
   pagesFromSync: boolean;
   media: MediaLite[];
+  catalogPrefs?: CatalogPrefs;
 }) {
   const router = useRouter();
   const [d, setD] = useState<DraftData>(initial);
@@ -78,10 +79,52 @@ export default function Wizard({
   const cur = account?.currency ?? "BRL";
   const page = pages.find((p) => p.id === d.creative.pageId);
   const catalog = d.creative.mode === "catalog";
+  const autoCat = catalog && d.catalog.source === "auto";
 
   const setC = (p: Partial<DraftData["campaign"]>) => setD((x) => ({ ...x, campaign: { ...x.campaign, ...p } }));
   const setA = (p: Partial<DraftData["adset"]>) => setD((x) => ({ ...x, adset: { ...x.adset, ...p } }));
   const setCr = (p: Partial<DraftData["creative"]>) => setD((x) => ({ ...x, creative: { ...x.creative, ...p } }));
+  const setK = (p: Partial<CatalogAuto>) => setD((x) => ({ ...x, catalog: { ...x.catalog, ...p } }));
+
+  // Capas dos vídeos do catálogo automático: escolhida, com o mesmo nome na biblioteca ou gerada de um frame
+  const [coverJob, setCoverJob] = useState<Record<string, string>>({});
+  const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({});
+  const chosenMedia = d.creative.mediaIds.map((id) => media.find((m) => m.id === id)).filter(Boolean) as MediaLite[];
+  const coverOf = (v: MediaLite) =>
+    media.find((m) => m.id === d.catalog.covers[v.id] && m.kind === "image") ?? media.find((m) => m.kind === "image" && coverBase(m.name) === coverBase(v.name));
+  useEffect(() => {
+    if (!autoCat) return;
+    for (const v of chosenMedia) {
+      if (v.kind !== "video" || coverOf(v) || coverJob[v.id]) continue;
+      setCoverJob((j) => ({ ...j, [v.id]: "working" }));
+      captureFrame(v.public_url)
+        .then((blob) => uploadMedia(new File([blob], `${coverBase(v.name)}-capa.jpg`, { type: "image/jpeg" })))
+        .then((img) => {
+          setMedia((l) => [img, ...l]);
+          setD((x) => ({ ...x, catalog: { ...x.catalog, covers: { ...x.catalog.covers, [v.id]: img.id } } }));
+          setCoverJob((j) => ({ ...j, [v.id]: "done" }));
+        })
+        .catch((e) => setCoverJob((j) => ({ ...j, [v.id]: `Não deu para gerar a capa: ${e?.message ?? e}. Escolha uma imagem.` })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCat, d.creative.mediaIds, media]);
+  // Resolução das imagens que vão para os produtos (a Meta pede pelo menos 500×500)
+  const productImages = autoCat ? chosenMedia.map((m) => (m.kind === "video" ? coverOf(m) : m)).filter(Boolean) as MediaLite[] : [];
+  useEffect(() => {
+    for (const m of productImages) {
+      if (dims[m.id]) continue;
+      const img = new Image();
+      img.onload = () => setDims((x) => ({ ...x, [m.id]: { w: img.naturalWidth, h: img.naturalHeight } }));
+      img.src = m.public_url;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productImages.map((m) => m.id).join()]);
+  const coverErrors = autoCat
+    ? [
+        ...chosenMedia.filter((v) => v.kind === "video" && !coverOf(v)).map((v) => (coverJob[v.id] === "working" ? `Gerando a capa de ${v.name}…` : `Falta a capa de ${v.name}.`)),
+        ...productImages.filter((m) => dims[m.id] && (dims[m.id].w < 500 || dims[m.id].h < 500)).map((m) => `A imagem ${m.name} tem ${dims[m.id].w}×${dims[m.id].h}; o catálogo pede pelo menos 500×500.`),
+      ]
+    : [];
 
   // Salva sozinho 1,2 s depois da última alteração
   useEffect(() => {
@@ -127,7 +170,7 @@ export default function Wizard({
   }, [d.accountId, d.campaign.catalogId]);
 
   // Conferência das contas extras (BM, pixel, catálogo, públicos, moeda)
-  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id)]);
+  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.catalog.source, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id)]);
   useEffect(() => {
     if (!d.accountId || !d.extraAccountIds.length) { setChecks({ loading: false, list: [] }); return; }
     let alive = true;
@@ -156,7 +199,12 @@ export default function Wizard({
 
   function setMode(mode: "media" | "catalog") {
     setCr({ mode });
-    if (mode === "catalog") changeObjective("OUTCOME_SALES");
+    if (mode === "catalog") {
+      changeObjective("OUTCOME_SALES");
+      // Preferências da última campanha de catálogo
+      const { catalogFormat, ...prefs } = catalogPrefs;
+      setD((x) => (x.catalog.price === null ? { ...x, catalog: { ...x.catalog, ...prefs }, creative: { ...x.creative, catalogFormat: catalogFormat ?? x.creative.catalogFormat } } : x));
+    }
   }
 
   async function publish() {
@@ -171,9 +219,11 @@ export default function Wizard({
     setPublishing(false);
   }
 
-  const stepState = (n: 1 | 2 | 3) => (errors[n].length ? "err" : "ok");
+  const stepErrors = (n: 1 | 2 | 3) => (n === 3 ? [...errors[3], ...coverErrors] : errors[n]);
+  const stepState = (n: 1 | 2 | 3) => (stepErrors(n).length ? "err" : "ok");
   const checkErrors = checks.list.flatMap((c) => c.errors.map((e) => `${c.name}: ${e}`));
-  const allErrors = [...errors[1], ...errors[2], ...errors[3], ...checkErrors];
+  const step3Errors = [...errors[3], ...coverErrors];
+  const allErrors = [...errors[1], ...errors[2], ...step3Errors, ...checkErrors];
 
   return (
     <div className="space-y-5">
@@ -189,7 +239,7 @@ export default function Wizard({
         {STEP_LABELS.map((l, i) => {
           const n = (i + 1) as 1 | 2 | 3 | 4;
           const state = n === 4 ? (allErrors.length ? "" : "ok") : stepState(n);
-          const sub = n === 4 ? (allErrors.length ? `${allErrors.length} pendência(s)` : "Pronto") : errors[n].length ? `${errors[n].length} pendência(s)` : "Completo";
+          const sub = n === 4 ? (allErrors.length ? `${allErrors.length} pendência(s)` : "Pronto") : stepErrors(n).length ? `${stepErrors(n).length} pendência(s)` : "Completo";
           return (
             <button key={l} type="button" className="step" data-state={state} aria-current={step === n ? "step" : undefined} onClick={() => setStep(n)}>
               <span className="step-num">{state === "ok" && step !== n ? "✓" : n}</span>
@@ -226,7 +276,7 @@ export default function Wizard({
             value={d.extraAccountIds}
             onChange={(extraAccountIds) => setD((x) => ({ ...x, extraAccountIds }))}
           />
-          {d.extraAccountIds.length > 0 && <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />}
+          {d.extraAccountIds.length > 0 && <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={autoCat ? "Automático" : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />}
 
           <div>
             <span className="label">Tipo de anúncio</span>
@@ -237,7 +287,13 @@ export default function Wizard({
           </div>
 
           {catalog && (
-            <div className="field">
+            <div className="grid gap-2">
+              {autoCat ? (
+                <p className="notice notice-ok text-sm">
+                  <b>Catálogo automático.</b> Você só escolhe os criativos na etapa Criativos. Na publicação, o painel usa o catálogo do Business Manager da conta (ou cria um), cria os produtos com as imagens e o conjunto de produtos da campanha.
+                </p>
+              ) : (
+              <div className="field">
               <span className="label">Catálogo vinculado</span>
               <select className="select" aria-label="Catálogo vinculado" value={d.campaign.catalogId} onChange={(e) => { setC({ catalogId: e.target.value }); setA({ productSetId: "" }); }}>
                 <option value="">{loading ? "Carregando…" : look.catalogs.length ? "Escolha…" : "Nenhum catálogo no BM da conta — crie abaixo"}</option>
@@ -252,6 +308,15 @@ export default function Wizard({
                 }}
               />
               <span className="text-xs text-muted">Gerencie produtos e mídias em <Link className="underline" href="/automacao/catalogos">Catálogos</Link>.</span>
+            </div>
+              )}
+              <details open={!autoCat}>
+                <summary className="text-sm text-info">Avançado: usar um catálogo que já existe</summary>
+                <div className="grid sm:grid-cols-2 gap-2 mt-2">
+                  <label className="choice"><input type="radio" checked={autoCat} onChange={() => setK({ source: "auto" })} /><span><b>Automático</b> <span className="text-xs text-muted">(recomendado)</span><span className="block text-xs text-muted">O painel cria catálogo, produtos e conjunto</span></span></label>
+                  <label className="choice"><input type="radio" checked={!autoCat} onChange={() => setK({ source: "existing" })} /><span><b>Catálogo existente</b><span className="block text-xs text-muted">Você escolhe o catálogo e o conjunto de produtos</span></span></label>
+                </div>
+              </details>
             </div>
           )}
 
@@ -357,7 +422,8 @@ export default function Wizard({
             </div>
           )}
 
-          {catalog && (
+          {autoCat && <p className="text-xs text-muted">Catálogo automático: o conjunto de produtos é criado na publicação, só com os produtos desta campanha.</p>}
+          {catalog && !autoCat && (
             <label className="field">
               <span className="label">Conjunto de produtos</span>
               <select className="select" value={d.adset.productSetId} onChange={(e) => setA({ productSetId: e.target.value })}>
@@ -488,9 +554,11 @@ export default function Wizard({
               <p className="notice notice-warn text-sm">A Página {page.name} está perto do limite de anúncios ({page.ads_running}/{page.ads_limit}). Novos anúncios podem ficar parados.</p>
             )}
 
-            {!catalog ? (
+            {(!catalog || autoCat) && (
               <div className="grid gap-2">
-                <span className="label">Imagens e vídeos ({d.creative.mediaIds.length} escolhida(s) — um anúncio para cada)</span>
+                <span className="label">
+                  {autoCat ? `Criativos dos produtos (${d.creative.mediaIds.length} escolhido(s))` : `Imagens e vídeos (${d.creative.mediaIds.length} escolhida(s) — um anúncio para cada)`}
+                </span>
                 <MediaUploader compact onUploaded={(m) => { setMedia((l) => [m, ...l]); setCr({ mediaIds: [...d.creative.mediaIds, m.id] }); }} />
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[300px] overflow-y-auto pr-1">
                   {media.map((m) => {
@@ -506,7 +574,21 @@ export default function Wizard({
                   })}
                 </div>
               </div>
-            ) : (
+            )}
+            {autoCat && (
+              <CatalogSetup
+                d={d}
+                chosen={chosenMedia}
+                media={media}
+                coverOf={coverOf}
+                coverJob={coverJob}
+                dims={dims}
+                cur={cur}
+                setK={setK}
+                setCr={setCr}
+              />
+            )}
+            {catalog && !autoCat && (
               <label className="field">
                 <span className="label">Apresentação do catálogo</span>
                 <select className="select" value={d.creative.catalogFormat} onChange={(e) => setCr({ catalogFormat: e.target.value })}>
@@ -540,7 +622,7 @@ export default function Wizard({
               <input className="input" value={d.creative.adName} onChange={(e) => setCr({ adName: e.target.value })} />
               <span className="text-xs text-muted">{"{midia}"} = nome do arquivo · {"{n}"} = número do anúncio</span>
             </label>
-            <StepErrors list={errors[3]} />
+            <StepErrors list={step3Errors} />
             <StepNav step={step} setStep={setStep} />
           </section>
 
@@ -559,11 +641,11 @@ export default function Wizard({
             ["Orçamento", d.campaign.budgetLevel === "campaign" ? `Na campanha · ${d.campaign.budgetType === "daily" ? "diário" : "total"} ${money(d.campaign.budget, cur)}` : `No conjunto · ${d.campaign.budgetType === "daily" ? "diário" : "total"}`],
             ["Lance", label(BID_STRATEGIES, d.campaign.bidStrategy)],
             ["Status inicial", d.campaign.status === "ACTIVE" ? "Ativa" : "Pausada"],
-            ...(catalog ? [["Catálogo", look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name ?? d.campaign.catalogId] as [string, string]] : []),
+            ...(catalog ? [["Catálogo", autoCat ? "Automático (catálogo do BM da conta)" : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name ?? d.campaign.catalogId] as [string, string]] : []),
           ]} />
           {d.extraAccountIds.length > 0 && (
             <section className="panel panel-pad">
-              <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />
+              <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={autoCat ? "Automático" : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />
             </section>
           )}
           <Summary title="Conjunto" onEdit={() => setStep(2)} rows={[
@@ -581,6 +663,10 @@ export default function Wizard({
             ["Página", page?.name ?? "—"],
             ["Instagram", d.creative.instagramId ? (look.instagram.find((i) => i.id === d.creative.instagramId)?.username ?? page?.instagram_username ?? d.creative.instagramId) : "Usar a Página"],
             [catalog ? "Apresentação" : "Anúncios", catalog ? label(CATALOG_FORMATS, d.creative.catalogFormat) : `${d.creative.mediaIds.length} (um por mídia)`],
+            ...(autoCat ? [
+              ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
+              ["Vídeo nos produtos", chosenMedia.some((m) => m.kind === "video") ? (d.catalog.delayMinutes > 0 ? `${d.catalog.delayMinutes} min depois da publicação` : "Já na criação") : "—"] as [string, string],
+            ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
             ["UTMs", d.creative.urlTags || "—"],
           ]} />
@@ -596,8 +682,11 @@ export default function Wizard({
             <h2>O que vai acontecer</h2>
             <ol className="text-sm text-muted list-decimal pl-5 space-y-0.5">
               <li>Criação da campanha e do conjunto na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
+              {autoCat && <li>Catálogo do Business Manager da conta (reaproveitado, ou criado uma única vez).</li>}
+              {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
               <li>Criação de {catalog ? 1 : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
+              {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento: o vídeo entra nos produtos {d.catalog.delayMinutes} min depois (a atualização passa pela revisão da Meta).</li>}
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
             <p className="text-xs text-muted">Cada etapa aparece na tela de processamento. Se cair a conexão ou você recarregar, nada é criado em dobro.</p>
@@ -826,6 +915,112 @@ function NewCatalog({ accountId, onCreated }: { accountId: string; onCreated: (c
   );
 }
 
+/** Frame do vídeo (no navegador) para virar a capa do produto; garante pelo menos 600 px no menor lado. */
+async function captureFrame(url: string): Promise<Blob> {
+  const v = document.createElement("video");
+  v.crossOrigin = "anonymous";
+  v.muted = true;
+  v.preload = "auto";
+  v.src = url;
+  await new Promise<void>((ok, fail) => { v.onloadeddata = () => ok(); v.onerror = () => fail(new Error("o navegador não abriu o vídeo")); });
+  v.currentTime = Math.min(1, (v.duration || 4) / 4);
+  await new Promise<void>((ok) => { v.onseeked = () => ok(); });
+  const scale = Math.max(1, 600 / Math.min(v.videoWidth || 600, v.videoHeight || 600));
+  const c = document.createElement("canvas");
+  c.width = Math.round(v.videoWidth * scale);
+  c.height = Math.round(v.videoHeight * scale);
+  c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
+  return new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("falha ao gerar a imagem"))), "image/jpeg", 0.9));
+}
+
+function CatalogSetup({ d, chosen, media, coverOf, coverJob, dims, cur, setK, setCr }: {
+  d: DraftData; chosen: MediaLite[]; media: MediaLite[]; coverOf: (v: MediaLite) => MediaLite | undefined; coverJob: Record<string, string>;
+  dims: Record<string, { w: number; h: number }>; cur: string; setK: (p: Partial<CatalogAuto>) => void; setCr: (p: Partial<DraftData["creative"]>) => void;
+}) {
+  const images = media.filter((m) => m.kind === "image");
+  const hasVideo = chosen.some((m) => m.kind === "video");
+  const advancedOpen = !(Number(d.catalog.price) > 0);
+  return (
+    <div className="grid gap-3 border border-line rounded-xl p-3">
+      <span className="label !mb-0">Produtos do catálogo</span>
+      {chosen.length > 0 ? (
+        <ul className="grid gap-2">
+          {chosen.map((m) => {
+            const cover = m.kind === "video" ? coverOf(m) : m;
+            const job = coverJob[m.id];
+            const size = cover && dims[cover.id];
+            return (
+              <li key={m.id} className="flex items-center gap-3">
+                <span className="w-14 h-14 rounded-lg overflow-hidden bg-surface-2 shrink-0 grid place-items-center text-[10px] text-muted">
+                  {cover ? <img src={cover.public_url} alt="" className="w-full h-full object-cover" /> : job === "working" ? "gerando…" : "sem capa"}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-sm">{m.name}</span>
+                  <span className="text-xs text-muted">
+                    {m.kind === "video" ? "Vídeo · imagem inicial: " : "Imagem · "}
+                    {cover ? `${cover.name}${size ? ` (${size.w}×${size.h})` : ""}` : job && job !== "working" && job !== "done" ? <span className="neg">{job}</span> : "gerando a partir do vídeo…"}
+                  </span>
+                </span>
+                {m.kind === "video" && (
+                  <select className="select !h-8 !w-40 text-xs" value="" aria-label={`Trocar a capa de ${m.name}`}
+                    onChange={(e) => e.target.value && setK({ covers: { ...d.catalog.covers, [m.id]: e.target.value } })}>
+                    <option value="">Trocar capa…</option>
+                    {images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  </select>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">Escolha os criativos acima: cada um vira um produto.</p>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="field">
+          <span className="label">Produtos por criativo</span>
+          <input className="input num" type="number" min={1} max={10} value={d.catalog.productsPerCreative}
+            onChange={(e) => setK({ productsPerCreative: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} />
+        </label>
+        {hasVideo && (
+          <div className="field">
+            <span className="label">Vídeo nos produtos</span>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={d.catalog.delayMinutes > 0} onChange={(e) => setK({ delayMinutes: e.target.checked ? 60 : 0 })} />
+                Atualizar depois de
+              </label>
+              <input className="input num !w-20" type="number" min={15} step={5} disabled={!(d.catalog.delayMinutes > 0)} value={d.catalog.delayMinutes || 60}
+                onChange={(e) => setK({ delayMinutes: Math.max(15, Number(e.target.value) || 15) })} aria-label="Minutos até o vídeo entrar nos produtos" />
+              <span className="text-sm text-muted">min</span>
+            </div>
+            <span className="text-xs text-muted">
+              {d.catalog.delayMinutes > 0
+                ? "Os produtos começam com a imagem inicial; o vídeo entra no horário marcado (a alteração passa pela revisão da Meta)."
+                : "Desligado: o vídeo já entra nos produtos na criação."}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <details open={advancedOpen}>
+        <summary className="text-sm text-info">Configurações avançadas {advancedOpen ? "— informe o preço" : ""}</summary>
+        <div className="grid sm:grid-cols-3 gap-3 mt-2">
+          <label className="field"><span className="label">Preço dos produtos ({cur})</span><MoneyInput value={d.catalog.price} onChange={(v) => setK({ price: v })} /></label>
+          <label className="field"><span className="label">Marca (vazio = nome da Página)</span><input className="input" value={d.catalog.brand} maxLength={100} onChange={(e) => setK({ brand: e.target.value })} /></label>
+          <label className="field">
+            <span className="label">Apresentação</span>
+            <select className="select" value={d.creative.catalogFormat} onChange={(e) => setCr({ catalogFormat: e.target.value })}>
+              {CATALOG_FORMATS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+        </div>
+        <span className="text-xs text-muted block mt-1">Nome do produto = título do anúncio (ou nome da campanha); link = URL de destino. Fica salvo para as próximas campanhas.</span>
+      </details>
+    </div>
+  );
+}
+
 function CheckList({ title, options, value, onChange }: { title: string; options: [string, string][]; value: string[]; onChange: (v: string[]) => void }) {
   return (
     <div>
@@ -974,7 +1169,7 @@ function Preview({ d, page, media }: { d: DraftData; page?: PageLite; media: Med
           <option value="INSTAGRAM_STORY">Stories Instagram</option>
           <option value="INSTAGRAM_REELS">Reels Instagram</option>
         </select>
-        <button type="button" className="btn btn-sm !h-[34px]" onClick={official} disabled={meta.loading || !d.accountId || !d.creative.pageId || (!catalog && !m)}>
+        <button type="button" className="btn btn-sm !h-[34px]" onClick={official} disabled={meta.loading || !d.accountId || !d.creative.pageId || (!catalog && !m) || (catalog && d.catalog.source === "auto")}>
           {meta.loading ? "Gerando…" : "Prévia da Meta"}
         </button>
       </div>

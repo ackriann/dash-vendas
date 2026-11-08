@@ -2,6 +2,7 @@ import "server-only";
 import { db, rawDb, currentWorkspaceId } from "../db";
 import { MetaError, type MetaAuth } from "../meta";
 import { uploadImageBytes, uploadVideoFromUrl, videoStatus } from "./meta-ads";
+import { coverBase } from "./types";
 
 // =====================================================================
 // Biblioteca de mídias: arquivo no Supabase Storage (bucket público "automacao")
@@ -145,4 +146,22 @@ export async function ensureOnAccount(auth: MetaAuth, act: string, asset: MediaA
     return { state: "ready", video_id: videoId, thumbnail_url: st.picture };
   }
   return { state: "processing", video_id: videoId, progress: st.status?.processing_progress };
+}
+
+
+/**
+ * Capa de cada vídeo: a escolhida no rascunho, senão uma imagem da biblioteca
+ * com o mesmo nome do vídeo (a capa gerada do frame é salva assim e reaproveitada).
+ */
+export async function resolveCovers(videos: MediaAsset[], chosen: Record<string, string>): Promise<Record<string, MediaAsset>> {
+  if (!videos.length) return {};
+  const explicit = await getMediaMany(videos.map((v) => chosen[v.id]).filter(Boolean));
+  const { data } = await db().from("media_assets").select("*").eq("kind", "image").eq("status", "ready").order("created_at", { ascending: false }).limit(500);
+  const images = (data ?? []) as MediaAsset[];
+  const out: Record<string, MediaAsset> = {};
+  for (const v of videos) {
+    const pick = explicit.find((m) => m.id === chosen[v.id] && m.kind === "image") ?? images.find((m) => coverBase(m.name) === coverBase(v.name));
+    if (pick) out[v.id] = pick;
+  }
+  return out;
 }

@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { db, getSetting } from "@/lib/db";
 import { listAccounts, listAllPages, listProfiles } from "@/lib/profiles";
 import { getDraft, listDrafts } from "@/lib/automacao/engine";
 import { listMedia } from "@/lib/automacao/media";
-import type { AccountLite, MediaLite, PageLite } from "@/lib/automacao/types";
+import type { AccountLite, CatalogPrefs, MediaLite, PageLite } from "@/lib/automacao/types";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
 import { duplicateDraftAction, newDraftAction } from "../actions";
@@ -91,6 +91,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
     const live = await listAllPages().catch(() => ({ pages: [], errors: [] }));
     pages = live.pages.map((p) => ({ id: p.id, name: p.name, picture_url: p.picture?.data?.url ?? null, instagram_id: null, instagram_username: null, ads_running: null, ads_limit: null }));
   }
+  const catalogPrefs = await getSetting<CatalogPrefs>("catalog_prefs", {});
   const media: MediaLite[] = (await listMedia().catch(() => [])).map((m) => ({ id: m.id, kind: m.kind, name: m.name, public_url: m.public_url }));
 
   return (
@@ -110,6 +111,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
         pages={pages}
         pagesFromSync={pagesFromSync}
         media={media}
+        catalogPrefs={catalogPrefs}
       />
     </div>
   );
