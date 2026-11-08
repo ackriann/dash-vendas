@@ -73,7 +73,8 @@ export async function accountBusiness(auth: MetaAuth, act: string): Promise<{ id
     graphAll<{ id: string; name: string }>(`${act}/agencies`, { fields: "id,name" }, auth, 2).catch(() => [] as { id: string; name: string }[]),
     listBusinesses(auth).catch(() => [] as { id: string; name: string }[]),
   ]);
-  const viaAgency = agencies.find((a) => mine.some((m) => m.id === a.id));
+  // Prefere um BM que o perfil também acessa; senão, o BM que a Meta diz ter a conta
+  const viaAgency = agencies.find((a) => mine.some((m) => m.id === a.id)) ?? agencies[0];
   if (viaAgency) return viaAgency;
   for (const b of mine.slice(0, 20)) {
     const accs = await graphAll<{ id: string }>(`${b.id}/client_ad_accounts`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]);
