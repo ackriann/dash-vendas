@@ -3,7 +3,7 @@ import { db, getSetting, setSetting } from "../db";
 import { startOfDayUtc } from "../dates";
 import { MetaError, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
-import { NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
+import { CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
   accountBusiness, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
   instagramIdentity, linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
@@ -187,8 +187,10 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
         template_data: {
           link: cr.url,
           message: cr.message || undefined,
-          name: cr.headline || "{{product.name}}",
-          description: cr.description || "{{product.current_price}}",
+          // Não introduzir nome/preço do catálogo no texto do anúncio automaticamente.
+          // O operador pode personalizar ambos os campos no assistente.
+          name: cr.headline || CATALOG_DEFAULT_HEADLINE,
+          description: cr.description || CATALOG_DEFAULT_DESCRIPTION,
           call_to_action: ctaOf(d, false),
           format_option: d.catalog?.preferVideo ? "single_video" : cr.catalogFormat,
           multi_share_end_card: false,
