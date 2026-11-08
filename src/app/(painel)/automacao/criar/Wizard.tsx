@@ -110,6 +110,16 @@ export default function Wizard({
     saveProductImageAction(id).catch(() => {});
   }
 
+  // Uma imagem já selecionada como criativo também serve como capa do
+  // catálogo; não obrigue a escolhê-la uma segunda vez.
+  // Não substitua uma capa que o usuário já definiu manualmente.
+  useEffect(() => {
+    if (!autoCat || productImage) return;
+    const selectedImage = chosenMedia.find((m) => m.kind === "image");
+    if (selectedImage) setK({ productImageId: selectedImage.id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCat, d.catalog.productImageId, d.creative.mediaIds, media]);
+
   // Salva sozinho 1,2 s depois da última alteração
   useEffect(() => {
     if (first.current) { first.current = false; return; }
@@ -929,9 +939,11 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
   dims: Record<string, { w: number; h: number }>; cur: string; setK: (p: Partial<CatalogAuto>) => void; setCr: (p: Partial<DraftData["creative"]>) => void;
 }) {
   const images = media.filter((m) => m.kind === "image");
-  const hasVideo = chosen.some((m) => m.kind === "video");
-  const advancedOpen = !(Number(d.catalog.price) > 0);
   const [picking, setPicking] = useState(!productImage);
+  // Quando a capa é escolhida automaticamente, recolha o seletor manual.
+  useEffect(() => {
+    if (productImage) setPicking(false);
+  }, [productImage?.id]);
   const size = productImage && dims[productImage.id];
   return (
     <div className="grid gap-3 border border-line rounded-xl p-3">
@@ -1016,12 +1028,15 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           <input className="input num" type="number" min={1} max={10} value={d.catalog.productsPerCreative}
             onChange={(e) => setK({ productsPerCreative: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} />
         </label>
+        <label className="field">
+          <span className="label">Preço dos produtos ({cur}) <span className="text-xs text-muted">(obrigatório)</span></span>
+          <MoneyInput value={d.catalog.price} onChange={(v) => setK({ price: v })} />
+        </label>
       </div>
 
-      <details open={advancedOpen}>
-        <summary className="text-sm text-info">Configurações avançadas {advancedOpen ? "— informe o preço" : ""}</summary>
-        <div className="grid sm:grid-cols-3 gap-3 mt-2">
-          <label className="field"><span className="label">Preço dos produtos ({cur})</span><MoneyInput value={d.catalog.price} onChange={(v) => setK({ price: v })} /></label>
+      <details>
+        <summary className="text-sm text-info">Configurações avançadas</summary>
+        <div className="grid sm:grid-cols-2 gap-3 mt-2">
           <label className="field"><span className="label">Marca (vazio = nome da Página)</span><input className="input" value={d.catalog.brand} maxLength={100} onChange={(e) => setK({ brand: e.target.value })} /></label>
           <label className="field">
             <span className="label">Apresentação</span>
