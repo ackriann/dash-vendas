@@ -226,15 +226,9 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
   };
 }
 
-registerExecutor("creative", async (ctx) => {
-  const d = draftOf(ctx);
-  const auth = await authForAccount(d.accountId);
-  const mediaKey = ctx.job.input.mediaKey as string | undefined;
-  const media = mediaKey ? (ctx.done[mediaKey] as any) : null;
-  if (mediaKey && !media) throw new Error("A mídia deste anúncio ainda não está pronta.");
-  const setKey = ctx.job.input.productSetKey as string | undefined;
-  if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
-  let dd = setKey ? { ...d, adset: { ...d.adset, productSetId: ctx.done[setKey].id } } : d;
+/** Cria o criativo na conta (identidade do Instagram resolvida pela Página quando não há perfil escolhido). */
+async function makeCreative(ctx: ExecCtx, d: DraftData, auth: MetaAuth, media: any, productSetId?: string) {
+  let dd = productSetId ? { ...d, adset: { ...d.adset, productSetId } } : d;
   // Anúncio que pode sair no Instagram precisa de identidade lá: sem perfil escolhido, usa a da Página
   const onInstagram = d.adset.placements === "auto" || d.adset.platforms.includes("instagram");
   if (onInstagram && !d.creative.instagramId) {
@@ -243,24 +237,46 @@ registerExecutor("creative", async (ctx) => {
     });
     if (ig) dd = { ...dd, creative: { ...dd.creative, instagramId: ig } };
   }
-  const spec = buildCreativeSpec(dd, media);
-  const r = await createIn<{ id: string }>(auth, `${d.accountId}/adcreatives`, { name: `${ctx.job.input.adName} · criativo`, ...spec });
+  return createIn<{ id: string }>(auth, `${d.accountId}/adcreatives`, { name: `${ctx.job.input.adName} · criativo`, ...buildCreativeSpec(dd, media) });
+}
+
+registerExecutor("creative", async (ctx) => {
+  const d = draftOf(ctx);
+  const auth = await authForAccount(d.accountId);
+  const mediaKey = ctx.job.input.mediaKey as string | undefined;
+  const media = mediaKey ? (ctx.done[mediaKey] as any) : null;
+  if (mediaKey && !media) throw new Error("A mídia deste anúncio ainda não está pronta.");
+  const setKey = ctx.job.input.productSetKey as string | undefined;
+  if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
+  const r = await makeCreative(ctx, d, auth, media, setKey ? ctx.done[setKey].id : undefined);
   return { status: "done", metaId: r.id, result: { id: r.id }, message: `Criativo ${r.id}` };
 });
+
+/** A Meta recusou o conjunto de produtos do criativo por não ser igual/subconjunto do conjunto de anúncios. */
+const PRODUCT_SET_MISMATCH = /conjunto de produtos incompat|subconjunto de promoted_object|product set.*(incompatible|subset)|subset of the promoted_object/i;
 
 registerExecutor("ad", async (ctx) => {
   const d = draftOf(ctx);
   const adsetId = ctx.done.adset?.id;
-  const creativeId = ctx.done[String(ctx.job.input.creativeKey)]?.id;
+  let creativeId = ctx.done[String(ctx.job.input.creativeKey)]?.id;
   if (!adsetId || !creativeId) throw new Error("Conjunto ou criativo ainda não criados.");
   const auth = await authForAccount(d.accountId);
-  const r = await createOnce(ctx, auth, d.accountId, "ads", {
-    name: String(ctx.job.input.adName),
-    adset_id: adsetId,
-    creative: { creative_id: creativeId },
-    status: d.campaign.status,
-  });
-  return { status: "done", metaId: r.id, result: { id: r.id }, message: r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}` };
+  const create = (creative: string) =>
+    createOnce(ctx, auth, d.accountId, "ads", { name: String(ctx.job.input.adName), adset_id: adsetId, creative: { creative_id: creative }, status: d.campaign.status });
+  let note = "";
+  let r;
+  try {
+    r = await create(creativeId);
+  } catch (e: any) {
+    // Um anúncio por criativo: se a Meta não aceitar o conjunto de produtos só do criativo,
+    // refaz o criativo com o conjunto de produtos do próprio conjunto de anúncios
+    const setId = ctx.done.product_set?.id;
+    if (!(d.creative.mode === "catalog" && setId && PRODUCT_SET_MISMATCH.test(String(e?.message ?? "")))) throw e;
+    creativeId = (await makeCreative(ctx, d, auth, null, setId)).id;
+    r = await create(creativeId);
+    note = " · com o conjunto de produtos da campanha (a Meta não aceitou o do criativo)";
+  }
+  return { status: "done", metaId: r.id, result: { id: r.id, creative_id: creativeId }, message: (r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}`) + note };
 });
 
 const IN_REVIEW = new Set(["PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED", "PENDING_BILLING_INFO"]);
