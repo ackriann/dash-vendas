@@ -321,7 +321,7 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
   if ((!catalog || autoCatalog) && !cr.mediaIds.length) e[3].push(autoCatalog ? "Escolha os criativos dos produtos." : "Escolha pelo menos uma imagem ou vídeo.");
   if (autoCatalog) {
     if (!d.catalog.productImageId) e[3].push("Escolha a imagem do produto (fica salva como padrão para os próximos catálogos).");
-    if (!(Number(d.catalog.price) > 0)) e[3].push("Informe o preço dos produtos (em Configurações avançadas do catálogo).");
+    if (!(Number(d.catalog.price) > 0)) e[3].push("Informe o preço dos produtos.");
     if (!(d.catalog.productsPerCreative >= 1 && d.catalog.productsPerCreative <= 10)) e[3].push("Produtos por criativo: de 1 a 10.");
     if (!Number.isInteger(d.catalog.delayMinutes) || d.catalog.delayMinutes < 0 || d.catalog.delayMinutes > 1440) e[3].push("Delay do vídeo: informe de 0 a 1440 minutos.");
   }
