@@ -281,6 +281,23 @@ registerExecutor("ad", async (ctx) => {
   return { status: "done", metaId: r.id, result: { id: r.id, creative_id: creativeId }, message: (r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}`) + note };
 });
 
+/**
+ * Confirma que a Meta já devolveu IDs para os anúncios criados.
+ * Não depende da aprovação: a revisão continua sendo monitorada à parte.
+ */
+registerExecutor("publish_confirm", async (ctx) => {
+  const adIds = Object.entries(ctx.done)
+    .filter(([key]) => key.startsWith("ad:"))
+    .map(([, value]) => String(value.id ?? ""))
+    .filter(Boolean);
+  if (!adIds.length) throw new MetaError("A Meta ainda não confirmou a criação dos anúncios.");
+  return {
+    status: "done",
+    result: { adIds },
+    message: `${adIds.length} anúncio(s) criado(s) na Meta — revisão será acompanhada`,
+  };
+});
+
 const IN_REVIEW = new Set(["PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED", "PENDING_BILLING_INFO"]);
 
 /** Publicação na Meta: acompanha a revisão dos anúncios criados. */
