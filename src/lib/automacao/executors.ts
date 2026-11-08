@@ -172,6 +172,8 @@ export function buildCreativeSpec(d: DraftData, media: { kind: string; hash?: st
   if (cr.mode === "catalog") {
     return {
       product_set_id: d.adset.productSetId,
+      // Priorizar vídeo: mídia dinâmica da Meta (usa o vídeo do produto quando houver)
+      ...(d.catalog?.preferVideo ? { degrees_of_freedom_spec: { creative_features_spec: { media_type_automation: { enroll_status: "OPT_IN" } } } } : {}),
       object_story_spec: {
         page_id: cr.pageId,
         ...ig,
@@ -223,7 +225,9 @@ registerExecutor("creative", async (ctx) => {
   const mediaKey = ctx.job.input.mediaKey as string | undefined;
   const media = mediaKey ? (ctx.done[mediaKey] as any) : null;
   if (mediaKey && !media) throw new Error("A mídia deste anúncio ainda não está pronta.");
-  const spec = buildCreativeSpec(d, media);
+  const setKey = ctx.job.input.productSetKey as string | undefined;
+  if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
+  const spec = buildCreativeSpec(setKey ? { ...d, adset: { ...d.adset, productSetId: ctx.done[setKey].id } } : d, media);
   const r = await createIn<{ id: string }>(auth, `${d.accountId}/adcreatives`, { name: `${ctx.job.input.adName} · criativo`, ...spec });
   return { status: "done", metaId: r.id, result: { id: r.id }, message: `Criativo ${r.id}` };
 });
@@ -526,7 +530,8 @@ registerExecutor("product_set", async (ctx) => {
   if (!catalogId) throw new Error("O catálogo ainda não foi identificado.");
   const ids = (ctx.job.input.retailerIds ?? []) as string[];
   const auth = await authForAccount(d.accountId);
-  const name = `${d.campaign.name.trim()} · ${(ctx.run.ref_id ?? ctx.run.id).slice(0, 8)}`.slice(0, 200);
+  const suffix = ctx.job.input.suffix ? ` · ${ctx.job.input.suffix}` : "";
+  const name = `${d.campaign.name.trim()} · ${(ctx.run.ref_id ?? ctx.run.id).slice(0, 8)}${suffix}`.slice(0, 200);
   const found = (await listProductSets(auth, catalogId).catch(() => [])).find((x) => x.name === name);
   const id = found?.id ?? (await createProductSet(auth, catalogId, name, ids)).id;
   return { status: "done", metaId: id, result: { id, name }, message: `${found ? "Conjunto de produtos reaproveitado" : "Conjunto de produtos criado"}: ${name}` };

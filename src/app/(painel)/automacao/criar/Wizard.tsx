@@ -597,6 +597,7 @@ export default function Wizard({
                 <span className="text-xs text-muted">As imagens e vídeos vêm dos produtos do catálogo. Use {"{{product.name}}"} e {"{{product.current_price}}"} nos textos.</span>
               </label>
             )}
+            {catalog && !autoCat && <PreferVideo d={d} setK={setK} />}
 
             <label className="field">
               <span className="label">Texto principal ({d.creative.message.length}/2200)</span>
@@ -662,9 +663,10 @@ export default function Wizard({
           <Summary title="Criativos" onEdit={() => setStep(3)} rows={[
             ["Página", page?.name ?? "—"],
             ["Instagram", d.creative.instagramId ? (look.instagram.find((i) => i.id === d.creative.instagramId)?.username ?? page?.instagram_username ?? d.creative.instagramId) : "Usar a Página"],
-            [catalog ? "Apresentação" : "Anúncios", catalog ? label(CATALOG_FORMATS, d.creative.catalogFormat) : `${d.creative.mediaIds.length} (um por mídia)`],
+            [catalog ? "Apresentação" : "Anúncios", catalog ? `${label(CATALOG_FORMATS, d.creative.catalogFormat)}${d.catalog.preferVideo ? " · priorizando vídeo" : ""}` : `${d.creative.mediaIds.length} (um por mídia)`],
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
+              ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, no mesmo conjunto)` : "1 com todos os produtos"] as [string, string],
               ["Vídeo nos produtos", chosenMedia.some((m) => m.kind === "video") ? (d.catalog.delayMinutes > 0 ? `${d.catalog.delayMinutes} min depois da publicação` : "Já na criação") : "—"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
@@ -685,7 +687,7 @@ export default function Wizard({
               {autoCat && <li>Catálogo do Business Manager da conta (reaproveitado, ou criado uma única vez).</li>}
               {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
-              <li>Criação de {catalog ? 1 : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
+              <li>Criação de {catalog ? (autoCat && d.catalog.adsMode === "per_creative" ? d.creative.mediaIds.length : 1) : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
               {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento: o vídeo entra nos produtos {d.catalog.delayMinutes} min depois (a atualização passa pela revisão da Meta).</li>}
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
@@ -933,6 +935,18 @@ async function captureFrame(url: string): Promise<Blob> {
   return new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("falha ao gerar a imagem"))), "image/jpeg", 0.9));
 }
 
+function PreferVideo({ d, setK }: { d: DraftData; setK: (p: Partial<CatalogAuto>) => void }) {
+  return (
+    <label className="choice">
+      <input type="checkbox" checked={d.catalog.preferVideo} onChange={(e) => setK({ preferVideo: e.target.checked })} />
+      <span>
+        <b>Priorizar vídeo do catálogo</b>
+        <span className="block text-xs text-muted">Mídia dinâmica da Meta: quando o produto tem vídeo, o anúncio mostra o vídeo no lugar da imagem.</span>
+      </span>
+    </label>
+  );
+}
+
 function CatalogSetup({ d, chosen, media, coverOf, coverJob, dims, cur, setK, setCr }: {
   d: DraftData; chosen: MediaLite[]; media: MediaLite[]; coverOf: (v: MediaLite) => MediaLite | undefined; coverJob: Record<string, string>;
   dims: Record<string, { w: number; h: number }>; cur: string; setK: (p: Partial<CatalogAuto>) => void; setCr: (p: Partial<DraftData["creative"]>) => void;
@@ -975,6 +989,22 @@ function CatalogSetup({ d, chosen, media, coverOf, coverJob, dims, cur, setK, se
       ) : (
         <p className="text-sm text-muted">Escolha os criativos acima: cada um vira um produto.</p>
       )}
+
+      <div>
+        <span className="label">Anúncios no conjunto</span>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <label className="choice">
+            <input type="radio" checked={d.catalog.adsMode !== "per_creative"} onChange={() => setK({ adsMode: "single" })} />
+            <span><b>Um anúncio</b><span className="block text-xs text-muted">Todos os produtos no mesmo anúncio de catálogo</span></span>
+          </label>
+          <label className="choice">
+            <input type="radio" checked={d.catalog.adsMode === "per_creative"} onChange={() => setK({ adsMode: "per_creative" })} />
+            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Vários anúncios no mesmo conjunto, cada um com os produtos do seu criativo</span></span>
+          </label>
+        </div>
+      </div>
+
+      <PreferVideo d={d} setK={setK} />
 
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="field">

@@ -135,13 +135,17 @@ export interface CatalogAuto {
   brand: string;
   /** capa escolhida para cada vídeo (id do vídeo → id da imagem na biblioteca) */
   covers: Record<string, string>;
+  /** single = um anúncio com todos os produtos · per_creative = um anúncio por criativo, no mesmo conjunto */
+  adsMode: "single" | "per_creative";
+  /** mídia dinâmica da Meta: mostra o vídeo do produto quando houver */
+  preferVideo: boolean;
 }
 
 /** Nome-base que liga um vídeo à sua capa: "promo.mp4" ↔ "promo.jpg" ou "promo-capa.jpg". */
 export const coverBase = (name: string) => name.replace(/\.[a-z0-9]+$/i, "").replace(/-capa$/i, "").toLowerCase();
 
 /** Preferências do catálogo automático reaproveitadas nas próximas campanhas. */
-export type CatalogPrefs = Partial<Pick<CatalogAuto, "productsPerCreative" | "delayMinutes" | "price" | "brand">> & { catalogFormat?: string };
+export type CatalogPrefs = Partial<Pick<CatalogAuto, "productsPerCreative" | "delayMinutes" | "price" | "brand" | "adsMode" | "preferVideo">> & { catalogFormat?: string };
 
 export interface DraftData {
   accountId: string;
@@ -259,7 +263,7 @@ export function emptyDraft(accountId = ""): DraftData {
       catalogFormat: "carousel_images_multi_items",
       adName: "{midia}",
     },
-    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", covers: {} },
+    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", covers: {}, adsMode: "single", preferVideo: true },
   };
 }
 

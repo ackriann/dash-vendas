@@ -144,12 +144,28 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       { key: "check", kind: "catalog_check", label: "Processamento dos produtos pela Meta", input: { publish: true } },
       { key: "product_set", kind: "product_set", label: "Conjunto de produtos da campanha", input: { retailerIds: products.map((p) => p.retailerId) } },
     );
+    // Um anúncio por criativo: cada anúncio mostra só os produtos do seu criativo
+    if (d.catalog.adsMode === "per_creative") {
+      const media = await getMediaMany(d.creative.mediaIds);
+      media.forEach((m, i) => {
+        const ids = products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId);
+        if (ids.length) jobs.push({ key: `product_set:${i + 1}`, kind: "product_set", label: `Conjunto de produtos · ${m.name}`, input: { retailerIds: ids, suffix: m.name } });
+      });
+    }
   }
   jobs.push(
     { key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` },
     { key: "adset", kind: "adset", label: `Criação do conjunto · ${d.adset.name}` },
   );
-  if (d.creative.mode === "catalog") {
+  if (autoCatalog && d.catalog.adsMode === "per_creative") {
+    const media = await getMediaMany(d.creative.mediaIds);
+    media.forEach((m, i) => {
+      const n = i + 1;
+      const adName = adNameFor(d.creative.adName, n, m.name, media.length);
+      jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo de catálogo · ${adName}`, input: { adName, productSetKey: `product_set:${n}` } });
+      jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
+    });
+  } else if (d.creative.mode === "catalog") {
     const adName = adNameFor(d.creative.adName.replace("{midia}", "Catálogo"), 1, null, 1);
     jobs.push({ key: "creative:1", kind: "creative", label: `Criativo de catálogo`, input: { adName } });
     jobs.push({ key: "ad:1", kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: "creative:1" } });
