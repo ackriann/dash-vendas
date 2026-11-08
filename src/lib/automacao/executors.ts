@@ -290,6 +290,13 @@ registerExecutor("review", async (ctx) => {
   const st = await Promise.all(ids.map((id) => getEffectiveStatus(auth, id)));
   const rejected = st.filter((s) => s.effective_status === "DISAPPROVED" || s.effective_status === "WITH_ISSUES");
   if (rejected.length) {
+    // Uma reprovação impede atualizações pendentes nos produtos desta campanha.
+    const scheduleIds = (ctx.done.video_schedule?.scheduleIds ?? []) as string[];
+    if (scheduleIds.length) {
+      await db().from("catalog_schedules")
+        .update({ active: false, last_result: "Cancelada: anúncio reprovado pela Meta" })
+        .in("id", scheduleIds);
+    }
     const why = rejected
       .map((s) => Object.values(s.ad_review_feedback?.global ?? {}).join(" ") || s.issues_info?.[0]?.error_message || s.effective_status)
       .join(" · ");
@@ -588,12 +595,16 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
   }
   const start = new Date(Date.now() + input.delayMinutes * 60000).toISOString();
   let made = 0;
+  const scheduleIds: string[] = [];
   for (const v of input.videos) {
     // Inclui o processo e a mídia na chave para não confundir campanhas com nomes iguais.
     const name = `Vídeo · ${ctx.run.id.slice(0, 8)} · ${v.videoId.slice(0, 8)} · ${v.videoName}`.slice(0, 200);
     const { data: exists } = await db().from("catalog_schedules").select("id").eq("catalog_id", catalogId).eq("name", name).maybeSingle();
-    if (exists) continue;
-    const { error } = await db().from("catalog_schedules").insert({
+    if (exists) {
+      scheduleIds.push(exists.id);
+      continue;
+    }
+    const { data: created, error } = await db().from("catalog_schedules").insert({
       name,
       profile_id: acc.profile_id,
       catalog_id: catalogId,
@@ -605,11 +616,12 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
       start_at: start,
       next_run_at: start,
       active: true,
-    });
-    if (error) throw new Error(error.message);
+    }).select("id").single();
+    if (error || !created) throw new Error(error?.message ?? "Não foi possível registrar a atualização programada.");
+    scheduleIds.push(created.id);
     made++;
   }
-  return { status: "done", result: { start, schedules: made }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })} — processamento sujeito à Meta` };
+  return { status: "done", result: { start, schedules: made, scheduleIds }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })} — processamento sujeito à Meta` };
 });
 
 onRunFinished("catalog_update", async (run, jobs) => {
