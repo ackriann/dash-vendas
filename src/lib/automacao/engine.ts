@@ -309,6 +309,7 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
         validationKey,
         isolatedCatalogProduct: isolated,
         mediaId: m?.id ?? undefined,
+        retailerIds: isolated && m ? products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId) : undefined,
       };
       if (validationKey) {
         validationJobs.push({
