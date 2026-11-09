@@ -161,7 +161,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
           <form action={recoverCatalogPublicationAction}>
             <input type="hidden" name="id" value={run.id} />
             <SubmitButton className="btn btn-primary" pendingText="Recuperando…"
-              confirm="Recuperar esta publicação? A campanha, o catálogo e os produtos existentes serão preservados. Será criado UM novo conjunto de anúncios pausado dentro da mesma campanha. O conjunto antigo permanecerá pausado e o processo validará novamente os vídeos.">
+              confirm="Recuperar esta publicação? A campanha, o catálogo e os produtos existentes serão preservados. Será criado UM novo conjunto de anúncios pausado dentro da mesma campanha. O conjunto antigo ficará na Meta sem alterações: confira seu status antes de ativar a campanha. Todos os vídeos serão validados novamente.">
               Recuperar conjunto na campanha original
             </SubmitButton>
           </form>
@@ -187,7 +187,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
       {finished && run.status === "failed" && (
         <p className="sub">
           {canRecoverCatalog
-            ? "Este processo ainda referencia um conjunto de anúncios antigo, incompatível com produtos individuais. Use a recuperação acima: ela mantém a campanha e cria um conjunto corrigido dentro dela. O conjunto antigo não será apagado."
+            ? "Este processo referencia um conjunto de anúncios antigo e incompatível com produtos individuais. Use a recuperação acima para manter a campanha e criar um conjunto corrigido dentro dela. O anterior não será apagado nem alterado."
             : "Tentar de novo preserva as operações concluídas. Para alterar a configuração, use Corrigir no rascunho."}
         </p>
       )}
