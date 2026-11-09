@@ -598,7 +598,7 @@ export async function runDueSchedules(options: { scheduleIds?: string[]; execute
         .update({ last_result: `Erro: ${msg}`, next_run_at: new Date(now.getTime() + s.interval_minutes * 60000).toISOString() })
         .eq("id", s.id);
       await logEvent("automacao", "catalogo", false, `${s.name}: ${msg}`);
-      out.push(`${s.name}: ${msg}`);
+      out.push(`${s.name}: Erro: ${msg}`);
     }
   }
   return out;
