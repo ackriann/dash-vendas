@@ -21,6 +21,129 @@ export async function retryRun(runId: string) {
   await queueRetry(runId);
 }
 
+type RecoverableJob = {
+  id: string;
+  key: string;
+  kind: string;
+  status: string;
+  meta_id: string | null;
+  input: Record<string, any>;
+  result: Record<string, any> | null;
+};
+
+type RecoveryContext = {
+  run: { id: string; status: string; kind: string; summary: Record<string, any> };
+  adsets: RecoverableJob[];
+  validators: RecoverableJob[];
+  jobs: RecoverableJob[];
+};
+
+/** Só oferece recuperação a uma publicação pausada que falhou na verificação
+ * de grupos de produtos e não tem NENHUM anúncio criado.
+ * Os dados são filtrados por workspace via db().
+ */
+async function recoverableCatalogContext(runId: string): Promise<RecoveryContext | null> {
+  const { data: run, error: runError } = await db().from("ops_runs")
+    .select("id,kind,status,summary").eq("id", runId).maybeSingle();
+  if (runError) throw new Error(runError.message);
+  if (!run || run.kind !== "publish" || run.status !== "failed" || !run.summary?.draft) return null;
+
+  const d = normalizeDraft(run.summary.draft);
+  if (d.creative.mode !== "catalog" || d.catalog.source !== "auto" ||
+      d.catalog.adsMode !== "per_creative" || d.campaign.status !== "PAUSED") return null;
+
+  const { data, error } = await db().from("ops_jobs")
+    .select("id,key,kind,status,meta_id,input,result").eq("run_id", runId).order("seq");
+  if (error) throw new Error(error.message);
+  const jobs = (data ?? []) as RecoverableJob[];
+  if (jobs.some((j) => j.kind === "ad" && (j.status === "done" || !!j.meta_id || !!j.result?.id))) return null;
+  if (!jobs.some((j) => j.key === "campaign" && j.status === "done" && j.meta_id)) return null;
+  if (!jobs.some((j) => j.key === "catalog" && j.status === "done" && j.meta_id)) return null;
+
+  const validators = jobs.filter((j) => j.kind === "ad_validate" &&
+    j.input?.isolatedCatalogProduct === true);
+  if (!validators.some((j) => j.status === "failed")) return null;
+
+  const adsets = jobs.filter((j) => j.kind === "adset" && j.status === "done" && !!j.meta_id &&
+    validators.some((v) => String(v.input?.adsetKey || "adset") === j.key) &&
+    (!!j.result?.product_set_id || !j.result?.catalog_per_ad));
+  if (!adsets.length) return null;
+  return { run, adsets, validators, jobs };
+}
+
+export async function canRecoverCatalogPublication(runId: string): Promise<boolean> {
+  return Boolean(await recoverableCatalogContext(runId));
+}
+
+/** Recuperação explícita: mantém campanha, catálogo, produtos e criativos.
+ * Só substitui o adset incompatível por UM adset pausado na mesma campanha.
+ * O anterior permanece na Meta, também pausado; não reutiliza o nome antigo.
+ */
+export async function recoverCatalogPublication(runId: string): Promise<string> {
+  const ctx = await recoverableCatalogContext(runId);
+  if (!ctx) throw new Error(
+    "Esta publicação não pode ser recuperada automaticamente. Confira se a campanha está pausada, " +
+    "se o erro é da associação de produtos e se nenhum anúncio foi criado."
+  );
+
+  const now = new Date().toISOString();
+  const recovered: { key: string; oldAdsetId: string | null }[] = [];
+  const affected = new Set(ctx.adsets.map((j) => j.key));
+
+  // Guardar o histórico dos adsets antigos para auditoria, sem excluir nada na Meta.
+  const history = Array.isArray(ctx.run.summary?.recoveryHistory) ? ctx.run.summary.recoveryHistory : [];
+  const { error: historyError } = await db().from("ops_runs")
+    .update({ summary: {
+      ...ctx.run.summary, recoveryHistory: [
+        ...history, ...ctx.adsets.map((j) => ({ at: now, adsetKey: j.key, oldAdsetId: j.meta_id })),
+      ],
+    } })
+    .eq("id", runId).eq("status", "failed");
+  if (historyError) throw new Error(historyError.message);
+
+  for (const job of ctx.adsets) {
+    // Nome único e attempts=0/started_at=null impedem createOnce() de buscar
+    // o adset antigo e reaproveitar sua configuração incompatível.
+    const original = String(job.input?.adsetName || "Conjunto");
+    const name = `${original.replace(/ · recuperação [a-f0-9-]+$/i, "").slice(0, 170)} · recuperação ${runId.slice(0, 8)}`;
+    const input = {
+      ...job.input, adsetName: name, catalogPerAd: true, productSetKey: null,
+      replacedAdsetId: job.meta_id,
+    };
+    const { data: updated, error } = await db().from("ops_jobs")
+      .update({
+        input, status: "pending", meta_id: null, result: null,
+        message: "Criando novo conjunto no mesmo ID de campanha", error: null,
+        attempts: 0, polls: 0, started_at: null, finished_at: null,
+        locked_until: null, run_after: now, updated_at: now,
+      })
+      .eq("id", job.id).eq("run_id", runId).eq("status", "done")
+      .select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!updated) throw new Error("O conjunto mudou de estado enquanto era recuperado. Reabra o processo.");
+    recovered.push({ key: job.key, oldAdsetId: job.meta_id });
+  }
+
+  // Invalida todas as verificações feitas com o antigo adset (inclusive as
+  // concluídas). Depois o retry normal libera o processador da fila.
+  const validatorIds = ctx.validators
+    .filter((job) => affected.has(String(job.input?.adsetKey || "adset")))
+    .map((j) => j.id);
+  if (validatorIds.length) {
+    const { error } = await db().from("ops_jobs")
+      .update({
+        status: "pending", result: null, meta_id: null, error: null,
+        message: "Revalidar com novo conjunto", attempts: 0, polls: 0,
+        started_at: null, finished_at: null, locked_until: null,
+        run_after: now, updated_at: now,
+      })
+      .eq("run_id", runId).in("id", validatorIds);
+    if (error) throw new Error(error.message);
+  }
+  await queueRetry(runId);
+  return `Recuperação iniciada: ${recovered.length} conjunto(s) novo(s) e pausado(s) na campanha original. Os anteriores permanecem na Meta sem alterações; confira o status antes de ativar a campanha.`;
+}
+
 /** Corrige a configuração do processo de publicação (e do rascunho) e continua de onde parou. */
 export async function fixAndContinue(runId: string, patch: { creative?: Partial<DraftData["creative"]>; adset?: Partial<DraftData["adset"]> }) {
   const { data: run } = await db().from("ops_runs").select("id,kind,ref_id,summary").eq("id", runId).maybeSingle();

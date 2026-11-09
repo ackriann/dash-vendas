@@ -331,20 +331,29 @@ function adBindings(ctx: ExecCtx) {
   }
   if (isolated) {
     const individualSet = productSetKey ? ctx.done[productSetKey] : null;
+    // Processos anteriores à migração de validações guardavam apenas { id, name }
+    // no resultado do product_set. Recuperar o filtro do input original, sem
+    // recriar produtos nem inventar outro conjunto.
+    const originalSetJob = ctx.jobs.find((job) =>
+      job.key === productSetKey && job.kind === "product_set" && job.status === "done");
+    const verifiedCatalog = individualSet?.catalog_id ??
+      (originalSetJob?.result?.id === individualSet?.id ? ctx.done.catalog?.id : null);
     if (
       !individualSet?.id ||
       !ctx.done[adsetKey]?.catalog_per_ad ||
       parent ||
       !ctx.done.catalog?.id ||
       ctx.done[adsetKey]?.catalog_id !== ctx.done.catalog.id ||
-      individualSet.catalog_id !== ctx.done.catalog.id
+      verifiedCatalog !== ctx.done.catalog.id
     ) {
       throw new MetaError("A associação de produto individual é inválida: o adset não pode promover outro product set.");
     }
     const expectedIds = ctx.job.input.retailerIds as string[] | undefined;
-    if (!expectedIds?.length || !Array.isArray(individualSet.retailerIds) ||
-      individualSet.retailerIds.length !== expectedIds.length ||
-      expectedIds.some((id) => !individualSet.retailerIds.includes(id))) {
+    const groupIds = Array.isArray(individualSet.retailerIds) ? individualSet.retailerIds :
+      originalSetJob?.input?.retailerIds;
+    if (!expectedIds?.length || !Array.isArray(groupIds) ||
+      groupIds.length !== expectedIds.length ||
+      expectedIds.some((id) => !groupIds.includes(id))) {
       throw new MetaError("O grupo de produtos deste anúncio não corresponde aos produtos do vídeo selecionado.");
     }
   } else if (productSetKey && parent !== expected) {

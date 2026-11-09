@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { creatorPages, getRunView } from "@/lib/automacao/engine";
+import { canRecoverCatalogPublication, creatorPages, getRunView } from "@/lib/automacao/engine";
 import { normalizeDraft } from "@/lib/automacao/types";
 import { videoUpdatesForPublication } from "@/lib/automacao/process-groups";
 import { db } from "@/lib/db";
@@ -17,6 +17,8 @@ export default async function Processo({ params, searchParams }: { params: Promi
   const run = await getRunView(id);
   if (!run) notFound();
   const videoUpdates = run.kind === "publish" ? await videoUpdatesForPublication(run.id) : [];
+  const canRecoverCatalog = run.status === "failed" && run.kind === "publish"
+    ? await canRecoverCatalogPublication(run.id) : false;
 
   // O botão só aparece para os agendamentos ainda ativos da publicação atual.
   // A consulta é limitada ao workspace autenticado pelo cliente do banco.
@@ -51,7 +53,8 @@ export default async function Processo({ params, searchParams }: { params: Promi
     <div className="space-y-4">
       <p className="text-sm"><Link className="text-muted hover:text-ink" href="/automacao/processos">← Processos</Link></p>
       <Notice ok={sp.ok} erro={sp.erro} />
-      <RunProgress initial={run} back={back} hasPendingVideos={hasPendingVideos} initialVideoUpdates={videoUpdates} />
+      <RunProgress initial={run} back={back} hasPendingVideos={hasPendingVideos}
+        initialVideoUpdates={videoUpdates} canRecoverCatalog={canRecoverCatalog} />
       {fix && <FixPanel runId={run.id} draftId={run.ref_id} draft={fix.draft} pages={fix.pages} error={fix.error} />}
     </div>
   );
