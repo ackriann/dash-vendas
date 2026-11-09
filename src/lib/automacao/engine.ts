@@ -205,10 +205,13 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
     );
     // Um conjunto global só é necessário quando a campanha possui um único adset.
     // Com vários adsets, cada grupo cria apenas seu próprio product set.
-    if (groups.length === 1) {
+    if (groups.length === 1 && !(d.catalog.adsMode === "per_creative" && groups[0].mediaIds.length > 1)) {
       jobs.push({ key: "product_set", kind: "product_set", label: "Produtos do conjunto", input: { retailerIds: products.map((p) => p.retailerId) } });
     }
     if (groups.length > 1) for (const group of groups) {
+      // Na configuração de produto por anúncio, o adset NÃO promove um conjunto geral.
+      // Cada anúncio possui somente seu próprio product set.
+      if (d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1) continue;
       const ids = products.filter((p) => group.mediaIds.includes(p.mediaId)).map((p) => p.retailerId);
       jobs.push({
         key: `product_set:group:${group.id}`,
@@ -232,7 +235,8 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
 
   for (const group of groups) {
     const adsetKey = groups.length === 1 ? "adset" : `adset:group:${group.id}`;
-    const groupProductSetKey = autoCatalog
+    const catalogPerAd = autoCatalog && d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1;
+    const groupProductSetKey = autoCatalog && !catalogPerAd
       ? (groups.length === 1 ? "product_set" : `product_set:group:${group.id}`)
       : undefined;
     jobs.push({
@@ -242,6 +246,7 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       input: {
         settings: group.settings,
         productSetKey: groupProductSetKey,
+        catalogPerAd,
         adsetName: groups.length > 1
           ? `${group.settings.name.slice(0, 170)} · ${group.id}`
           : group.settings.name,
@@ -269,10 +274,10 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       const creativeKey = `creative:${suffix}`;
       const adKey = `ad:${suffix}`;
 
-      // Um conjunto de produtos individual por vídeo, mas NÃO um adset novo.
-      // O adset continua promovendo o conjunto de produtos geral do grupo.
-      // A Meta valida antes de publicar se permite um subset no nível do criativo.
-      const isolated = autoCatalog && d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1 && !!m;
+      // Um produto (e conjunto de produtos) por vídeo, sem novos adsets.
+      // A campanha define o catálogo; o criativo define seu próprio product set.
+      // O adset não deve informar outro product_set_id no promoted_object.
+      const isolated = catalogPerAd && !!m;
       let creativeProductSetKey = groupProductSetKey;
       if (isolated && m) {
         creativeProductSetKey = `product_set:creative:${group.id}:${m.id}`;
@@ -304,6 +309,7 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
         validationKey,
         isolatedCatalogProduct: isolated,
         mediaId: m?.id ?? undefined,
+        retailerIds: isolated && m ? products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId) : undefined,
       };
       if (validationKey) {
         validationJobs.push({
