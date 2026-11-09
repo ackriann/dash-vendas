@@ -736,6 +736,8 @@ export default function Wizard({
             </section>
           )}
           <Summary title="Conjunto" onEdit={() => setStep(2)} rows={[
+            ["Estrutura", `1 campanha · ${structure.adsets} conjunto(s) · ${structure.ads} anúncio(s)`],
+            ["Conjuntos", groups.map((g) => `${g.settings.name || "Sem nome"} (${adsPerGroup(d, g)} anúncio(s)${d.campaign.budgetLevel === "adset" ? `, ${money(g.settings.budget, cur)}` : ""})`).join(" · ")],
             ["Nome", d.adset.name || "—"],
             ["Otimização", label(GOALS[d.campaign.objective], d.adset.optimizationGoal)],
             ...(d.adset.pixelId ? [["Pixel / evento", `${look.pixels.find((p) => p.id === d.adset.pixelId)?.name ?? d.adset.pixelId} · ${label(EVENTS, d.adset.event)}`] as [string, string]] : []),
@@ -752,7 +754,7 @@ export default function Wizard({
             [catalog ? "Apresentação" : "Anúncios", catalog ? `${label(CATALOG_FORMATS, d.creative.catalogFormat)}${d.catalog.preferVideo ? " · priorizando vídeo" : ""}` : `${d.creative.mediaIds.length} (um por mídia)`],
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
-              ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, em conjuntos separados)` : "1 com todos os produtos"] as [string, string],
+              ["Anúncios", `${structure.ads} anúncio(s) em ${structure.adsets} conjunto(s)`] as [string, string],
               ["Vídeos", d.catalog.delayMinutes > 0 ? `Atualização agendada em ${d.catalog.delayMinutes} minuto(s) após a criação dos anúncios` : "Na criação dos produtos"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
@@ -769,12 +771,12 @@ export default function Wizard({
           <div className="panel panel-pad space-y-3">
             <h2>O que vai acontecer</h2>
             <ol className="text-sm text-muted list-decimal pl-5 space-y-0.5">
-              <li>Criação da campanha e do conjunto na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
+              <li>Criação de 1 campanha, {structure.adsets} conjunto(s) e {structure.ads} anúncio(s) na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
               {autoCat && <li>Catálogo do Business Manager da conta (reaproveitado, ou criado uma única vez).</li>}
               {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
               {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento da inclusão dos vídeos nos produtos após {d.catalog.delayMinutes} minuto(s), com processamento e revisão aplicáveis pela Meta.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
-              <li>Criação de {catalog ? (autoCat && d.catalog.adsMode === "per_creative" ? d.creative.mediaIds.length : 1) : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
+              <li>Criação de {structure.ads} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
             <p className="text-xs text-muted">Cada etapa aparece na tela de processamento. Se cair a conexão ou você recarregar, nada é criado em dobro.</p>
@@ -1089,6 +1091,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
 
       <div>
         <span className="label">Distribuição dos anúncios</span>
+        <p className="text-xs text-muted">A quantidade de conjuntos é configurada na etapa Conjuntos. Um anúncio por criativo não significa um conjunto por anúncio.</p>
         <div className="grid sm:grid-cols-2 gap-2">
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode !== "per_creative"} onChange={() => setK({ adsMode: "single" })} />
@@ -1096,7 +1099,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           </label>
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode === "per_creative"} onChange={() => setK({ adsMode: "per_creative" })} />
-            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cada anúncio terá um conjunto próprio com somente seus produtos/vídeo. Se o orçamento estiver no conjunto, o valor será dividido entre os conjuntos.</span></span>
+            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cria a quantidade de anúncios selecionada em cada conjunto, sem criar conjuntos extras. No catálogo dinâmico, a Meta pode escolher produtos do mesmo conjunto.</span></span>
           </label>
         </div>
       </div>
