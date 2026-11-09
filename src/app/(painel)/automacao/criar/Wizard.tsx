@@ -1156,6 +1156,13 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
       </div>
 
       <PreferVideo d={d} setK={setK} />
+      {d.catalog.adsMode === "per_creative" && adsetGroupsFor(d).some((g) => g.mediaIds.length > 1) && (
+        <p className="notice notice-warn text-sm">
+          A Meta pode repetir o mesmo vídeo quando anúncios de catálogo compartilham o mesmo conjunto de produtos.
+          Para garantir um vídeo diferente por anúncio em 1 campanha → 1 conjunto → vários anúncios,
+          use o modo Imagens e vídeos (criativos individuais). O modo catálogo não permite garantir essa associação.
+        </p>
+      )}
 
       {chosen.some((m) => m.kind === "video") && (
         <label className="field">
