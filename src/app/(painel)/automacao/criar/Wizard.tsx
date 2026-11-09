@@ -192,7 +192,7 @@ export default function Wizard({
   }, [d.accountId, d.campaign.catalogId]);
 
   // Conferência das contas extras (BM, pixel, catálogo, públicos, moeda)
-  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.catalog.source, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id)]);
+  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.catalog.source, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id), d.adsetGroups]);
   useEffect(() => {
     if (!d.accountId || !d.extraAccountIds.length) { setChecks({ loading: false, list: [] }); return; }
     let alive = true;
@@ -209,14 +209,32 @@ export default function Wizard({
 
   // Pixel padrão: o único da conta
   useEffect(() => {
-    if (!d.adset.pixelId && look.pixels.length === 1) setA({ pixelId: look.pixels[0].id });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (look.pixels.length !== 1) return;
+    const pixelId = look.pixels[0].id;
+    setD((x) => {
+      const groups = adsetGroupsFor(x);
+      if (groups.every((g) => g.settings.pixelId)) return x;
+      const updated = groups.map((g) => ({
+        ...g, settings: g.settings.pixelId ? g.settings : { ...g.settings, pixelId },
+      }));
+      return { ...x, adset: updated[0].settings, adsetGroups: x.adsetGroups?.length ? updated : [] };
+    });
   }, [look.pixels]);
 
   function changeObjective(o: DraftData["campaign"]["objective"]) {
     const goals = GOALS[o];
-    setC({ objective: o });
-    if (!goals.some(([g]) => g === d.adset.optimizationGoal)) setA({ optimizationGoal: goals[0][0] });
+    setD((x) => {
+      const groups = adsetGroupsFor(x).map((g) => ({
+        ...g,
+        settings: goals.some(([goal]) => goal === g.settings.optimizationGoal)
+          ? g.settings : { ...g.settings, optimizationGoal: goals[0][0] },
+      }));
+      return {
+        ...x, campaign: { ...x.campaign, objective: o },
+        adset: groups[0].settings,
+        adsetGroups: x.adsetGroups?.length ? groups : [],
+      };
+    });
   }
 
   function setMode(mode: "media" | "catalog") {
@@ -281,7 +299,10 @@ export default function Wizard({
           <div className="grid md:grid-cols-2 gap-3">
             <label className="field">
               <span className="label">Conta de anúncio {d.extraAccountIds.length ? "principal" : "conectada"}</span>
-              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
+              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+                    adsetGroups: x.adsetGroups?.map((g) => ({
+                      ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+                    })) ?? [], campaign: { ...x.campaign, catalogId: "" } }))}>
                 <option value="">Escolha…</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}{a.account_status && a.account_status !== 1 ? " — não ativa" : ""}</option>
@@ -738,6 +759,7 @@ export default function Wizard({
           <Summary title="Conjunto" onEdit={() => setStep(2)} rows={[
             ["Estrutura", `1 campanha · ${structure.adsets} conjunto(s) · ${structure.ads} anúncio(s)`],
             ["Conjuntos", groups.map((g) => `${g.settings.name || "Sem nome"} (${adsPerGroup(d, g)} anúncio(s)${d.campaign.budgetLevel === "adset" ? `, ${money(g.settings.budget, cur)}` : ""})`).join(" · ")],
+            ...(d.campaign.budgetLevel === "adset" ? [["Orçamento somado dos conjuntos", money(groups.reduce((sum, g) => sum + Number(g.settings.budget || 0), 0), cur)] as [string, string]] : []),
             ["Nome", d.adset.name || "—"],
             ["Otimização", label(GOALS[d.campaign.objective], d.adset.optimizationGoal)],
             ...(d.adset.pixelId ? [["Pixel / evento", `${look.pixels.find((p) => p.id === d.adset.pixelId)?.name ?? d.adset.pixelId} · ${label(EVENTS, d.adset.event)}`] as [string, string]] : []),
