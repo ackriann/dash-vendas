@@ -6,7 +6,7 @@ import { db, getSetting, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
 import { accountBusiness, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
-import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, fixAndContinue, getDraft, publishDraft, retryRun, runDueSchedules } from "@/lib/automacao/engine";
+import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, fixAndContinue, getDraft, publishDraft, recoverCatalogPublication, retryRun, runDueSchedules } from "@/lib/automacao/engine";
 import { emptyDraft, normalizeDraft, type DraftData } from "@/lib/automacao/types";
 
 function go(path: string, key: "ok" | "erro", msg: string): never {
@@ -107,6 +107,21 @@ export async function retryRunAction(formData: FormData) {
     go(`/automacao/processos/${id}`, "erro", e?.message ?? "Falha");
   }
   go(`/automacao/processos/${id}`, "ok", "Processo na fila de novo. O que já foi feito na Meta é mantido.");
+}
+
+/** Recupera a campanha e o catálogo antigos, criando apenas um conjunto compatível. */
+export async function recoverCatalogPublicationAction(formData: FormData) {
+  await requireAuth();
+  const id = str(formData, "id");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) go("/automacao/processos", "erro", "Processo inválido.");
+  try {
+    const message = await recoverCatalogPublication(id);
+    go(`/automacao/processos/${id}`, "ok", message);
+  } catch (e: any) {
+    // redirect() lança um erro especial e só é usado fora do try acima.
+    if (e?.digest?.startsWith("NEXT_REDIRECT")) throw e;
+    go(`/automacao/processos/${id}`, "erro", e?.message ?? "Não foi possível recuperar a publicação.");
+  }
 }
 
 /** "Corrigir e continuar" na tela do processo: ajusta Página, Instagram, link e textos e segue de onde parou. */
