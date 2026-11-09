@@ -85,8 +85,12 @@ registerExecutor("adset", async (ctx) => {
   const a = (ctx.job.input.settings as DraftData["adset"] | undefined) ?? d.adset;
   const c = d.campaign;
   const productSetKey = ctx.job.input.productSetKey as string | undefined;
+  const catalogPerAd = ctx.job.input.catalogPerAd === true;
   const ownProductSetId = productSetKey ? ctx.done[productSetKey]?.id : undefined;
   if (productSetKey && !ownProductSetId) throw new Error("Conjunto de produtos específico do anúncio não encontrado.");
+  if (catalogPerAd && (productSetKey || d.creative.mode !== "catalog" || !ctx.done.catalog?.id)) {
+    throw new MetaError("Catálogo por anúncio inválido: a campanha precisa ter catálogo e o conjunto de anúncios não pode promover um conjunto de produtos geral.");
+  }
   const adsetCount = Number(ctx.job.input.adsetCount ?? 1);
   const adsetIndex = Number(ctx.job.input.adsetIndex ?? 1);
   if (!Number.isInteger(adsetCount) || adsetCount < 1 || !Number.isInteger(adsetIndex) || adsetIndex < 1 || adsetIndex > adsetCount) {
@@ -133,8 +137,22 @@ registerExecutor("adset", async (ctx) => {
   };
   if (["OFFSITE_CONVERSIONS", "VALUE", "LINK_CLICKS", "LANDING_PAGE_VIEWS"].includes(a.optimizationGoal)) params.destination_type = "WEBSITE";
   const catalog = d.creative.mode === "catalog";
-  if (catalog) params.promoted_object = { product_set_id: ownProductSetId || a.productSetId, ...(a.pixelId ? { pixel_id: a.pixelId, custom_event_type: a.event } : {}) };
-  else if (NEEDS_PIXEL.has(a.optimizationGoal)) params.promoted_object = { pixel_id: a.pixelId, custom_event_type: a.event };
+  if (catalog) {
+    if (catalogPerAd) {
+      // Novo formato de campanhas de catálogo: o catálogo é escolhido na
+      // campanha, pixel/dataset no adset, product set no criativo de cada anúncio.
+      // Nunca enviar product_set_id geral, que causa "Product Set Mismatch".
+      if (!a.pixelId) throw new MetaError("Escolha um pixel/dataset para este conjunto.");
+      params.promoted_object = { pixel_id: a.pixelId, custom_event_type: a.event };
+    } else {
+      params.promoted_object = {
+        product_set_id: ownProductSetId || a.productSetId,
+        ...(a.pixelId ? { pixel_id: a.pixelId, custom_event_type: a.event } : {}),
+      };
+    }
+  } else if (NEEDS_PIXEL.has(a.optimizationGoal)) {
+    params.promoted_object = { pixel_id: a.pixelId, custom_event_type: a.event };
+  }
 
   if (c.budgetLevel === "adset") {
     // Não multiplicar o gasto ao criar um conjunto por anúncio.
@@ -152,9 +170,24 @@ registerExecutor("adset", async (ctx) => {
   if (start && start > Date.now() / 1000) params.start_time = start;
   if (end) params.end_time = end;
 
-  const r = await createOnce(ctx, auth, d.accountId, "adsets", params);
+  let r: { id: string; reused: boolean };
+  try {
+    r = await createOnce(ctx, auth, d.accountId, "adsets", params);
+  } catch (e: any) {
+    if (!catalogPerAd) throw e;
+    throw new MetaError(
+      `A Meta não aceitou a estrutura de catálogo com produtos definidos por anúncio neste conjunto: ${String(e?.message ?? e)}. ` +
+      "Nenhum conjunto alternativo foi criado; os vídeos não serão misturados.",
+      e?.code, e?.subcode,
+    );
+  }
   return { status: "done", metaId: r.id,
-    result: { id: r.id, product_set_id: ownProductSetId || a.productSetId },
+    result: {
+      id: r.id,
+      product_set_id: catalogPerAd ? null : ownProductSetId || a.productSetId,
+      catalog_per_ad: catalogPerAd,
+      catalog_id: catalogPerAd ? ctx.done.catalog?.id : null,
+    },
     message: (r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Conjunto ${r.id}`) +
       (adsetCount > 1 ? ` · orçamento dividido entre ${adsetCount} conjuntos` : ""),
   };
@@ -277,8 +310,9 @@ registerExecutor("creative", async (ctx) => {
 });
 
 /** Confere as associações antes de permitir que a fila crie um anúncio.
- * Em catálogo individual, o adset promove todos os produtos, mas cada criativo
- * referencia SOMENTE o product set que contém o seu próprio vídeo.
+ * No modo de catálogo com seleção individual, cada criativo recebe um
+ * product set que pertence ao catálogo da campanha. O adset NÃO especifica
+ * product_set_id, evitando conflito de promoted_object.
  */
 function adBindings(ctx: ExecCtx) {
   const adsetKey = String(ctx.job.input.adsetKey || "adset");
@@ -290,15 +324,28 @@ function adBindings(ctx: ExecCtx) {
   const productSetKey = ctx.job.input.productSetKey as string | undefined;
   const isolated = ctx.job.input.isolatedCatalogProduct === true;
   const expected = productSetKey ? ctx.done[productSetKey]?.id : undefined;
-  const parent = ctx.done[adsetKey]?.product_set_id as string | undefined;
+  const parent = ctx.done[adsetKey]?.product_set_id as string | null | undefined;
 
   if (productSetKey && (!expected || ctx.done[creativeKey]?.product_set_id !== expected)) {
     throw new MetaError("O criativo não está vinculado ao conjunto de produtos de seu vídeo.");
   }
   if (isolated) {
-    const groupProductSetKey = String(ctx.job.input.groupProductSetKey || "");
-    if (!parent || !groupProductSetKey || ctx.done[groupProductSetKey]?.id !== parent) {
-      throw new MetaError("O conjunto de anúncios não possui o grupo correto de produtos.");
+    const individualSet = productSetKey ? ctx.done[productSetKey] : null;
+    if (
+      !individualSet?.id ||
+      !ctx.done[adsetKey]?.catalog_per_ad ||
+      parent ||
+      !ctx.done.catalog?.id ||
+      ctx.done[adsetKey]?.catalog_id !== ctx.done.catalog.id ||
+      individualSet.catalog_id !== ctx.done.catalog.id
+    ) {
+      throw new MetaError("A associação de produto individual é inválida: o adset não pode promover outro product set.");
+    }
+    const expectedIds = ctx.job.input.retailerIds as string[] | undefined;
+    if (!expectedIds?.length || !Array.isArray(individualSet.retailerIds) ||
+      individualSet.retailerIds.length !== expectedIds.length ||
+      expectedIds.some((id) => !individualSet.retailerIds.includes(id))) {
+      throw new MetaError("O grupo de produtos deste anúncio não corresponde aos produtos do vídeo selecionado.");
     }
   } else if (productSetKey && parent !== expected) {
     throw new MetaError("O produto do criativo não corresponde ao conjunto de anúncios.");
@@ -673,7 +720,7 @@ registerExecutor("product_set", async (ctx) => {
   const name = `${d.campaign.name.trim()} · ${(ctx.run.ref_id ?? ctx.run.id).slice(0, 8)}${suffix}`.slice(0, 200);
   const found = (await listProductSets(auth, catalogId).catch(() => [])).find((x) => x.name === name);
   const id = found?.id ?? (await createProductSet(auth, catalogId, name, ids)).id;
-  return { status: "done", metaId: id, result: { id, name }, message: `${found ? "Conjunto de produtos reaproveitado" : "Conjunto de produtos criado"}: ${name}` };
+  return { status: "done", metaId: id, result: { id, name, catalog_id: catalogId, retailerIds: ids }, message: `${found ? "Conjunto de produtos reaproveitado" : "Conjunto de produtos criado"}: ${name}` };
 });
 
 /**
