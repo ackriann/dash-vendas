@@ -107,10 +107,11 @@ export default function Wizard({
     setD((x) => ({ ...x, adset: remaining[0].settings, adsetGroups: remaining }));
     setSelectedGroupId(remaining[0].id);
   };
-  const setGroupMedia = (ids: string[]) => setD((x) => {
-    const list = adsetGroupsFor(x).map((g) => g.id === activeGroup.id ? { ...g, mediaIds: ids } : g);
+  const assignMediaToGroup = (groupId: string, ids: string[]) => setD((x) => {
+    const list = adsetGroupsFor(x).map((g) => g.id === groupId ? { ...g, mediaIds: ids } : g);
     return { ...x, adsetGroups: list };
   });
+  const setGroupMedia = (ids: string[]) => assignMediaToGroup(activeGroup.id, ids);
   const setCr = (p: Partial<DraftData["creative"]>) => setD((x) => ({ ...x, creative: { ...x.creative, ...p } }));
   const setK = (p: Partial<CatalogAuto>) => setD((x) => ({ ...x, catalog: { ...x.catalog, ...p } }));
 
@@ -672,6 +673,34 @@ export default function Wizard({
                     );
                   })}
                 </div>
+              </div>
+            )}
+            {(!catalog || autoCat) && chosenMedia.length > 0 && (d.adsetGroups?.length ?? 0) > 0 && (
+              <div className="border border-line rounded-xl p-3 space-y-3">
+                <div>
+                  <p className="font-semibold">Distribuir criativos entre os conjuntos</p>
+                  <p className="text-xs text-muted">Marque exatamente quais anúncios vão em cada conjunto. Ex.: 3 conjuntos com 4 criativos cada. Um arquivo pode ser reutilizado em mais de um conjunto.</p>
+                </div>
+                {groups.map((g, index) => (
+                  <div key={g.id} className="border-t border-line pt-3 space-y-2">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <span className="font-semibold text-sm">{index + 1}. {g.settings.name || "Conjunto sem nome"} — {g.mediaIds.length} selecionado(s)</span>
+                      <div className="flex gap-2">
+                        <button type="button" className="btn btn-sm" onClick={() => assignMediaToGroup(g.id, [...d.creative.mediaIds])}>Todos</button>
+                        <button type="button" className="btn btn-sm" onClick={() => assignMediaToGroup(g.id, [])}>Nenhum</button>
+                      </div>
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {chosenMedia.map((m) => (
+                        <label key={m.id} className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={g.mediaIds.includes(m.id)}
+                            onChange={(e) => assignMediaToGroup(g.id, e.target.checked ? [...g.mediaIds, m.id] : g.mediaIds.filter((id) => id !== m.id))} />
+                          <span className="truncate">{m.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {autoCat && (
