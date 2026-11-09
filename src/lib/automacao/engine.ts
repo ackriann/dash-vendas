@@ -202,8 +202,12 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       { key: "catalog", kind: "catalog_auto", label: "Catálogo do Business Manager (identifica ou cria)" },
       { key: "products", kind: "catalog_products", label: `Criação de ${products.length} produto(s) em lote`, input: { products } },
       { key: "check", kind: "catalog_check", label: "Processamento dos produtos pela Meta", input: { publish: true } },
-      { key: "product_set", kind: "product_set", label: "Produtos da campanha", input: { retailerIds: products.map((p) => p.retailerId) } },
     );
+    // Um conjunto global só é necessário quando a campanha possui um único adset.
+    // Com vários adsets, cada grupo cria apenas seu próprio product set.
+    if (groups.length === 1) {
+      jobs.push({ key: "product_set", kind: "product_set", label: "Produtos do conjunto", input: { retailerIds: products.map((p) => p.retailerId) } });
+    }
     if (groups.length > 1) for (const group of groups) {
       const ids = products.filter((p) => group.mediaIds.includes(p.mediaId)).map((p) => p.retailerId);
       jobs.push({
