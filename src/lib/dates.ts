@@ -1,3 +1,6 @@
+// Horário de Brasília para interfaces de automação e agendamento.
+export const BRASILIA_TIME_ZONE = "America/Sao_Paulo";
+
 // Datas sempre calculadas no fuso do painel (padrão America/Sao_Paulo).
 
 export type RangeKey = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "custom";
