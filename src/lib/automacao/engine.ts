@@ -227,42 +227,104 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
   jobs.push({ key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` });
 
   let serial = 0;
+  const validationJobs: JobSpec[] = [];
+  const adJobs: JobSpec[] = [];
+
   for (const group of groups) {
     const adsetKey = groups.length === 1 ? "adset" : `adset:group:${group.id}`;
-    const productSetKey = autoCatalog ? (groups.length === 1 ? "product_set" : `product_set:group:${group.id}`) : undefined;
+    const groupProductSetKey = autoCatalog
+      ? (groups.length === 1 ? "product_set" : `product_set:group:${group.id}`)
+      : undefined;
     jobs.push({
       key: adsetKey,
       kind: "adset",
       label: `Criação do conjunto · ${group.settings.name}`,
-      input: { settings: group.settings, productSetKey, adsetName: groups.length > 1 ? `${group.settings.name.slice(0, 170)} · ${group.id}` : group.settings.name, adsetCount: 1, adsetIndex: 1 },
+      input: {
+        settings: group.settings,
+        productSetKey: groupProductSetKey,
+        adsetName: groups.length > 1
+          ? `${group.settings.name.slice(0, 170)} · ${group.id}`
+          : group.settings.name,
+        adsetCount: 1,
+        adsetIndex: 1,
+      },
     });
 
-    const mediaForGroup = group.mediaIds.map((id) => assets.find((m) => m.id === id)).filter((m): m is (typeof assets)[number] => Boolean(m));
+    const mediaForGroup = group.mediaIds
+      .map((id) => assets.find((m) => m.id === id))
+      .filter((m): m is (typeof assets)[number] => Boolean(m));
     const multipleAds = d.creative.mode === "media" || (autoCatalog && d.catalog.adsMode === "per_creative");
     const entries = multipleAds ? mediaForGroup : [null];
+    const totalAds = groups.reduce((n, g) => n + (multipleAds ? g.mediaIds.length : 1), 0);
+
     for (const m of entries) {
       serial++;
       const suffix = groups.length === 1 ? String(serial) : `${group.id}:${serial}`;
-      const baseAdName = adNameFor(d.creative.adName, serial, m?.name ?? (d.creative.mode === "catalog" ? "Catálogo" : null), groups.reduce((n, g) => n + (multipleAds ? g.mediaIds.length : 1), 0));
-      // Evita nomes repetidos quando o mesmo criativo é usado em vários conjuntos.
-      // A recuperação idempotente busca o nome na Meta se a resposta anterior falhar.
+      const baseAdName = adNameFor(
+        d.creative.adName, serial,
+        m?.name ?? (d.creative.mode === "catalog" ? "Catálogo" : null),
+        totalAds,
+      );
       const adName = groups.length > 1 ? `${baseAdName.slice(0, 180)} · conjunto ${group.id}` : baseAdName;
       const creativeKey = `creative:${suffix}`;
+      const adKey = `ad:${suffix}`;
+
+      // Um conjunto de produtos individual por vídeo, mas NÃO um adset novo.
+      // O adset continua promovendo o conjunto de produtos geral do grupo.
+      // A Meta valida antes de publicar se permite um subset no nível do criativo.
+      const isolated = autoCatalog && d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1 && !!m;
+      let creativeProductSetKey = groupProductSetKey;
+      if (isolated && m) {
+        creativeProductSetKey = `product_set:creative:${group.id}:${m.id}`;
+        const retailerIds = products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId);
+        jobs.push({
+          key: creativeProductSetKey,
+          kind: "product_set",
+          label: `Produtos exclusivos do anúncio · ${m.name}`,
+          input: { retailerIds, suffix: `anuncio-${group.id}-${m.id.slice(0, 8)}` },
+        });
+      }
       jobs.push({
-        key: creativeKey, kind: "creative", label: `Criativo · ${adName}`,
+        key: creativeKey,
+        kind: "creative",
+        label: `Criativo de catálogo · ${adName}`,
         input: {
           adName,
           mediaKey: d.creative.mode === "media" && m ? `media:${m.id}` : undefined,
-          productSetKey,
+          productSetKey: creativeProductSetKey,
           settings: group.settings,
         },
       });
-      jobs.push({
-        key: `ad:${suffix}`, kind: "ad", label: `Criação do anúncio · ${adName}`,
-        input: { adName, creativeKey, adsetKey, productSetKey, mediaId: m?.id ?? undefined },
+
+      const validationKey = isolated ? `ad_validate:${suffix}` : undefined;
+      const adInput = {
+        adName, creativeKey, adsetKey,
+        productSetKey: creativeProductSetKey,
+        groupProductSetKey,
+        validationKey,
+        isolatedCatalogProduct: isolated,
+        mediaId: m?.id ?? undefined,
+      };
+      if (validationKey) {
+        validationJobs.push({
+          key: validationKey,
+          kind: "ad_validate",
+          label: `Verificar na Meta o produto exclusivo · ${adName}`,
+          input: adInput,
+        });
+      }
+      adJobs.push({
+        key: adKey,
+        kind: "ad",
+        label: `Criação do anúncio · ${adName}`,
+        input: adInput,
       });
     }
   }
+
+  // Primeiro validar TODOS os vínculos com a API, sem publicar anúncios.
+  // Só depois criar anúncios de verdade, se a Meta aceitar a estrutura.
+  jobs.push(...validationJobs, ...adJobs);
 
   if (videoSchedule) {
     jobs.push({ key: "publish_confirm", kind: "publish_confirm", label: "Publicação na Meta (anúncios criados)" });
