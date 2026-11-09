@@ -276,31 +276,87 @@ registerExecutor("creative", async (ctx) => {
   };
 });
 
-registerExecutor("ad", async (ctx) => {
-  const d = draftOf(ctx);
+/** Confere as associações antes de permitir que a fila crie um anúncio.
+ * Em catálogo individual, o adset promove todos os produtos, mas cada criativo
+ * referencia SOMENTE o product set que contém o seu próprio vídeo.
+ */
+function adBindings(ctx: ExecCtx) {
   const adsetKey = String(ctx.job.input.adsetKey || "adset");
-  const adsetId = ctx.done[adsetKey]?.id as string | undefined;
   const creativeKey = String(ctx.job.input.creativeKey);
+  const adsetId = ctx.done[adsetKey]?.id as string | undefined;
   const creativeId = ctx.done[creativeKey]?.id as string | undefined;
   if (!adsetId || !creativeId) throw new Error("Conjunto ou criativo ainda não criados.");
 
   const productSetKey = ctx.job.input.productSetKey as string | undefined;
-  if (productSetKey) {
-    const expected = ctx.done[productSetKey]?.id;
-    if (!expected || ctx.done[adsetKey]?.product_set_id !== expected || ctx.done[creativeKey]?.product_set_id !== expected) {
-      throw new MetaError("Vínculo entre anúncio, criativo e conjunto de produtos não corresponde ao vídeo selecionado.");
+  const isolated = ctx.job.input.isolatedCatalogProduct === true;
+  const expected = productSetKey ? ctx.done[productSetKey]?.id : undefined;
+  const parent = ctx.done[adsetKey]?.product_set_id as string | undefined;
+
+  if (productSetKey && (!expected || ctx.done[creativeKey]?.product_set_id !== expected)) {
+    throw new MetaError("O criativo não está vinculado ao conjunto de produtos de seu vídeo.");
+  }
+  if (isolated) {
+    const groupProductSetKey = String(ctx.job.input.groupProductSetKey || "");
+    if (!parent || !groupProductSetKey || ctx.done[groupProductSetKey]?.id !== parent) {
+      throw new MetaError("O conjunto de anúncios não possui o grupo correto de produtos.");
+    }
+  } else if (productSetKey && parent !== expected) {
+    throw new MetaError("O produto do criativo não corresponde ao conjunto de anúncios.");
+  }
+  return { adsetId, creativeId, productSetId: expected };
+}
+
+/** Valida o produto escolhido para cada anúncio com a API da Meta sem criar anúncio.
+ * Algumas contas exigem o MESMO product set no adset e no criativo: nesse caso
+ * falhar explicitamente é mais seguro do que publicar o vídeo errado.
+ */
+registerExecutor("ad_validate", async (ctx) => {
+  const d = draftOf(ctx);
+  const { adsetId, creativeId, productSetId } = adBindings(ctx);
+  const auth = await authForAccount(d.accountId);
+  try {
+    await createIn(auth, `${d.accountId}/ads`, {
+      name: String(ctx.job.input.adName),
+      adset_id: adsetId,
+      creative: { creative_id: creativeId },
+      status: "PAUSED",
+      execution_options: ["validate_only"],
+    });
+  } catch (e: any) {
+    throw new MetaError(
+      `A Meta recusou o conjunto de produtos individual deste anúncio: ${e?.message ?? "incompatível"}. ` +
+      "Nenhum anúncio deste lote foi publicado. Não substituímos o vídeo pelo conjunto geral.",
+      e?.code, e?.subcode,
+    );
+  }
+  return {
+    status: "done",
+    result: { valid: true, adsetId, creativeId, productSetId },
+    message: "Vínculo específico do vídeo aceito pela API da Meta (validação sem publicação)",
+  };
+});
+
+registerExecutor("ad", async (ctx) => {
+  const d = draftOf(ctx);
+  const { adsetId, creativeId, productSetId } = adBindings(ctx);
+  const validationKey = ctx.job.input.validationKey as string | undefined;
+  if (validationKey) {
+    const verified = ctx.done[validationKey];
+    if (!verified?.valid || verified.adsetId !== adsetId || verified.creativeId !== creativeId || verified.productSetId !== productSetId) {
+      throw new MetaError("A correspondência individual deste vídeo não foi validada pela Meta.");
     }
   }
   const auth = await authForAccount(d.accountId);
-  // Não voltar ao conjunto geral da campanha em caso de incompatibilidade.
-  // Isso misturava os vídeos de vários anúncios no mesmo produto dinâmico.
+  // Sem fallback para o product set geral: ele permitiria vídeos repetidos.
   const r = await createOnce(ctx, auth, d.accountId, "ads", {
-    name: String(ctx.job.input.adName), adset_id: adsetId,
-    creative: { creative_id: creativeId }, status: d.campaign.status,
+    name: String(ctx.job.input.adName),
+    adset_id: adsetId,
+    creative: { creative_id: creativeId },
+    status: d.campaign.status,
   });
   return {
     status: "done", metaId: r.id,
-    result: { id: r.id, creative_id: creativeId, adset_id: adsetId, product_set_id: productSetKey ? ctx.done[productSetKey].id : undefined },
+    result: { id: r.id, creative_id: creativeId, adset_id: adsetId, product_set_id: productSetId },
     message: r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}`,
   };
 });
