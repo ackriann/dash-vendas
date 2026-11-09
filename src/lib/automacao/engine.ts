@@ -110,15 +110,17 @@ export async function recoverCatalogPublication(runId: string): Promise<string> 
       ...job.input, adsetName: name, catalogPerAd: true, productSetKey: null,
       replacedAdsetId: job.meta_id,
     };
-    const { error } = await db().from("ops_jobs")
+    const { data: updated, error } = await db().from("ops_jobs")
       .update({
         input, status: "pending", meta_id: null, result: null,
         message: "Criando novo conjunto no mesmo ID de campanha", error: null,
         attempts: 0, polls: 0, started_at: null, finished_at: null,
         locked_until: null, run_after: now, updated_at: now,
       })
-      .eq("id", job.id).eq("run_id", runId).eq("status", "done");
+      .eq("id", job.id).eq("run_id", runId).eq("status", "done")
+      .select("id").maybeSingle();
     if (error) throw new Error(error.message);
+    if (!updated) throw new Error("O conjunto mudou de estado enquanto era recuperado. Reabra o processo.");
     recovered.push({ key: job.key, oldAdsetId: job.meta_id });
   }
 
@@ -139,7 +141,7 @@ export async function recoverCatalogPublication(runId: string): Promise<string> 
     if (error) throw new Error(error.message);
   }
   await queueRetry(runId);
-  return `Recuperação iniciada: ${recovered.length} conjunto(s) novo(s) na campanha original. O(s) conjunto(s) anterior(es) permanece(m) pausado(s).`;
+  return `Recuperação iniciada: ${recovered.length} conjunto(s) novo(s) e pausado(s) na campanha original. Os anteriores permanecem na Meta sem alterações; confira o status antes de ativar a campanha.`;
 }
 
 /** Corrige a configuração do processo de publicação (e do rascunho) e continua de onde parou. */
