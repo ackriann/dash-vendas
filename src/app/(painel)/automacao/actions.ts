@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
 import { db, getSetting, setSetting } from "@/lib/db";
 import { authForAccount, profileAuth } from "@/lib/profiles";
-import { accountBusiness, createCatalog, getProduct } from "@/lib/automacao/meta-ads";
+import { accountBusiness, createCatalog, getProduct, resolveCatalogBusiness } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
 import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, fixAndContinue, getDraft, publishDraft, recoverCatalogPublication, retryRun, runDueSchedules } from "@/lib/automacao/engine";
 import { emptyDraft, normalizeDraft, type DraftData } from "@/lib/automacao/types";
@@ -123,6 +123,60 @@ export async function recoverCatalogPublicationAction(formData: FormData) {
   go(`/automacao/processos/${id}`, "ok", message);
 }
 
+/** Processo antigo com erro de BM: selecionar a parceira e repetir somente a
+ * etapa do catálogo. Preserva o mesmo processo e suas demais configurações.
+ */
+export async function fixCatalogBusinessAction(formData: FormData) {
+  await requireAuth();
+  const runId = str(formData, "run_id");
+  const businessId = str(formData, "business_id");
+  if (!/^[0-9a-f-]{36}$/i.test(runId)) go("/automacao/processos", "erro", "Processo inválido.");
+  const back = `/automacao/processos/${runId}`;
+  if (!/^\d+$/.test(businessId)) go(back, "erro", "Selecione a BM parceira.");
+  try {
+    const { data: run, error } = await db().from("ops_runs")
+      .select("id,kind,status,ref_id,summary").eq("id", runId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!run || run.kind !== "publish" || run.status !== "failed") {
+      throw new Error("Somente publicações com falha podem corrigir a BM.");
+    }
+    const draft = normalizeDraft(run.summary?.draft);
+    if (draft.creative.mode !== "catalog" || draft.catalog.source !== "auto") {
+      throw new Error("Esta publicação não usa catálogo automático.");
+    }
+    const { data: jobs, error: jobsError } = await db().from("ops_jobs")
+      .select("kind,status").eq("run_id", runId);
+    if (jobsError) throw new Error(jobsError.message);
+    if (!jobs?.some((j) => j.kind === "catalog_auto" && j.status === "failed") ||
+        jobs?.some((j) => j.status === "done")) {
+      throw new Error("A etapa do catálogo não está na situação segura para trocar de BM.");
+    }
+
+    const auth = await authForAccount(draft.accountId);
+    const business = await resolveCatalogBusiness(auth, draft.accountId, businessId);
+    const next = { ...draft, catalog: { ...draft.catalog, businessId: business.id } };
+    const { error: updateError } = await db().from("ops_runs")
+      .update({ summary: { ...run.summary, draft: next } })
+      .eq("id", runId).eq("status", "failed");
+    if (updateError) throw new Error(updateError.message);
+    if (run.ref_id) {
+      const { data: oldDraft } = await db().from("auto_drafts")
+        .select("data").eq("id", run.ref_id).maybeSingle();
+      if (oldDraft) {
+        const { error: draftError } = await db().from("auto_drafts")
+          .update({ data: { ...oldDraft.data, catalog: { ...oldDraft.data.catalog, businessId: business.id } },
+            updated_at: new Date().toISOString() })
+          .eq("id", run.ref_id);
+        if (draftError) throw new Error(draftError.message);
+      }
+    }
+    await retryRun(runId);
+  } catch (e: any) {
+    go(back, "erro", e?.message ?? "Não foi possível corrigir a BM.");
+  }
+  go(back, "ok", "BM do catálogo atualizada. A criação será tentada novamente no mesmo processo.");
+}
+
 /** "Corrigir e continuar" na tela do processo: ajusta Página, Instagram, link e textos e segue de onde parou. */
 export async function fixAndContinueAction(formData: FormData) {
   await requireAuth();
@@ -219,8 +273,7 @@ export async function createCatalogForAccountAction(accountId: string, name: str
   if (!/^act_\d+$/.test(accountId)) return { error: "Escolha a conta de anúncio." };
   try {
     const auth = await authForAccount(accountId);
-    const bm = await accountBusiness(auth, accountId);
-    if (!bm) return { error: "Esta conta de anúncio não está em nenhum Business Manager que o perfil enxergue; catálogos só existem dentro de um BM." };
+    const bm = await resolveCatalogBusiness(auth, accountId);
     const { id } = await createCatalog(auth, bm.id, name);
     const { data: acc } = await db().from("ad_accounts").select("profile_id").eq("id", accountId).maybeSingle();
     return { id, name, profileId: acc?.profile_id ?? undefined };
