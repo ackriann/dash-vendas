@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { env } from "@/lib/env";
-import { fmtDateTime } from "@/lib/dates";
+import { BRASILIA_TIME_ZONE, fmtDateTime } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { graph } from "@/lib/meta";
 import { listProfiles, profileAuth } from "@/lib/profiles";
@@ -61,7 +60,7 @@ export default async function Catalogo({ params, searchParams }: { params: Promi
   const tab = TABS.some(([k]) => k === sp.aba) ? sp.aba! : "produtos";
   const profiles = await listProfiles().catch(() => []);
   const profile = profiles.find((p) => p.id === sp.perfil) ?? profiles[0];
-  const tz = env.timezone;
+  const tz = BRASILIA_TIME_ZONE;
   const base = `/automacao/catalogos/${id}?perfil=${profile?.id ?? ""}`;
 
   let catalog: { id: string; name: string; product_count?: number } | null = null;
