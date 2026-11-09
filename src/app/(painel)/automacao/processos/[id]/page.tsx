@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { creatorPages, getRunView } from "@/lib/automacao/engine";
 import { normalizeDraft } from "@/lib/automacao/types";
+import { videoUpdatesForPublication } from "@/lib/automacao/process-groups";
 import { db } from "@/lib/db";
 import Notice from "@/components/Notice";
 import RunProgress from "./RunProgress";
@@ -15,6 +16,7 @@ export default async function Processo({ params, searchParams }: { params: Promi
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
   const run = await getRunView(id);
   if (!run) notFound();
+  const videoUpdates = run.kind === "publish" ? await videoUpdatesForPublication(run.id) : [];
 
   // O botão só aparece para os agendamentos ainda ativos da publicação atual.
   // A consulta é limitada ao workspace autenticado pelo cliente do banco.
@@ -49,7 +51,7 @@ export default async function Processo({ params, searchParams }: { params: Promi
     <div className="space-y-4">
       <p className="text-sm"><Link className="text-muted hover:text-ink" href="/automacao/processos">← Processos</Link></p>
       <Notice ok={sp.ok} erro={sp.erro} />
-      <RunProgress initial={run} back={back} hasPendingVideos={hasPendingVideos} />
+      <RunProgress initial={run} back={back} hasPendingVideos={hasPendingVideos} initialVideoUpdates={videoUpdates} />
       {fix && <FixPanel runId={run.id} draftId={run.ref_id} draft={fix.draft} pages={fix.pages} error={fix.error} />}
     </div>
   );

@@ -5,6 +5,7 @@ import { JOB_STATUS_LABEL, RUN_KIND_LABEL, type RunView } from "@/lib/automacao/
 import { JobPill, RunPill } from "@/components/automacao/JobStatus";
 import SubmitButton from "@/components/SubmitButton";
 import { cancelRunAction, retryRunAction, updateScheduledVideosNowAction } from "../../actions";
+import type { VideoUpdateRow } from "@/lib/automacao/process-groups";
 
 const ICON: Record<string, string> = { pending: "·", running: "↻", waiting_sync: "↻", done: "✓", failed: "!", skipped: "–" };
 const LIVE = new Set(["queued", "running"]);
@@ -14,16 +15,24 @@ const LIVE = new Set(["queued", "running"]);
  * também avança a fila. Recarregar a página ou perder a conexão não duplica nada:
  * o estado está no banco e cada operação é travada enquanto executa.
  */
-export default function RunProgress({ initial, back, hasPendingVideos = false }: { initial: RunView; back?: { href: string; label: string } | null; hasPendingVideos?: boolean }) {
+export default function RunProgress({ initial, back, hasPendingVideos = false, initialVideoUpdates = [] }: {
+  initial: RunView;
+  back?: { href: string; label: string } | null;
+  hasPendingVideos?: boolean;
+  initialVideoUpdates?: VideoUpdateRow[];
+}) {
   const [run, setRun] = useState(initial);
   const [pendingVideos, setPendingVideos] = useState(hasPendingVideos);
+  const [videoUpdates, setVideoUpdates] = useState(initialVideoUpdates);
   const [offline, setOffline] = useState(false);
   const [tickError, setTickError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => setRun(initial), [initial]);
   useEffect(() => setPendingVideos(hasPendingVideos), [hasPendingVideos]);
-  const live = LIVE.has(run.status) || pendingVideos;
+  useEffect(() => setVideoUpdates(initialVideoUpdates), [initialVideoUpdates]);
+  const childRunning = videoUpdates.some((v) => LIVE.has(v.status));
+  const live = LIVE.has(run.status) || pendingVideos || childRunning;
 
   useEffect(() => {
     let stop = false;
@@ -33,9 +42,10 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
         const j = await r.json();
         if (j.run) setRun(j.run);
         if (typeof j.hasPendingVideos === "boolean") setPendingVideos(j.hasPendingVideos);
+        if (Array.isArray(j.videoUpdates)) setVideoUpdates(j.videoUpdates);
         setTickError(j.tickError ?? null);
         setOffline(false);
-        if (!stop && (LIVE.has(j.run?.status) || j.hasPendingVideos)) {
+        if (!stop && (LIVE.has(j.run?.status) || j.hasPendingVideos || j.videoUpdates?.some((v: VideoUpdateRow) => LIVE.has(v.status)))) {
           timer.current = setTimeout(poll, LIVE.has(j.run?.status) ? 1500 : 15000);
         }
       } catch {
@@ -98,6 +108,44 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
           ))}
         </ol>
       </section>
+
+      {run.kind === "publish" && run.jobs.some((j) => j.key === "video_schedule") && (
+        <section className="panel panel-pad space-y-3">
+          <div>
+            <h2>Atualizações dos vídeos desta campanha</h2>
+            <p className="text-sm text-muted">
+              Os vídeos são agrupados aqui pelo agendamento da publicação. Cada resultado corresponde a
+              uma atualização do catálogo, sem criar outra campanha ou outro anúncio.
+            </p>
+          </div>
+          {videoUpdates.length ? (
+            <div className="divide-y divide-line">
+              {videoUpdates.map((v) => (
+                <div key={v.id} className="py-3 space-y-1">
+                  <div className="flex flex-wrap gap-2 items-center justify-between">
+                    <span className="font-semibold break-words">{v.title}</span>
+                    <RunPill status={v.status} />
+                  </div>
+                  <p className="text-xs text-muted">
+                    {v.done} de {v.total} operação(ões) concluída(s)
+                    {v.waiting > 0 ? ` · ${v.waiting} aguardando` : ""}
+                    {v.failed > 0 ? ` · ${v.failed} com falha` : ""}
+                  </p>
+                  {v.error && <p className="text-sm neg break-words">{v.error}</p>}
+                  <Link className="text-xs text-info hover:underline" href={`/automacao/processos/${v.id}`}>
+                    Ver detalhes técnicos da atualização
+                  </Link>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">
+              Nenhuma atualização de vídeo executada ainda. As mídias aparecerão aqui quando o agendamento
+              disparar ou quando você clicar em “Atualizar vídeos agora”.
+            </p>
+          )}
+        </section>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {pendingVideos && run.kind === "publish" && (

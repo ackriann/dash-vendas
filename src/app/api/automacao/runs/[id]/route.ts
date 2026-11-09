@@ -1,5 +1,6 @@
 import { getRunView, runDueSchedules, tick } from "@/lib/automacao/engine";
 import { db } from "@/lib/db";
+import { videoUpdatesForPublication } from "@/lib/automacao/process-groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,5 +41,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       hasPendingVideos = (count ?? 0) > 0;
     }
   }
-  return Response.json({ run, tickError, hasPendingVideos }, { headers: { "Cache-Control": "no-store" } });
+  const videoUpdates = run.kind === "publish" ? await videoUpdatesForPublication(id) : [];
+  return Response.json({ run, tickError, hasPendingVideos, videoUpdates }, { headers: { "Cache-Control": "no-store" } });
 }
