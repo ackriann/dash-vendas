@@ -1,7 +1,7 @@
 import "server-only";
 import { db, getSetting, setSetting } from "../db";
 import { startOfDayUtc } from "../dates";
-import { MetaError, listPages, type MetaAuth } from "../meta";
+import { MetaError, graph, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
@@ -361,6 +361,28 @@ registerExecutor("ad_validate", async (ctx) => {
   const d = draftOf(ctx);
   const { adsetId, creativeId, productSetId } = adBindings(ctx);
   const auth = await authForAccount(d.accountId);
+  if (ctx.job.input.isolatedCatalogProduct === true) {
+    // Inspeciona a configuração realmente persistida na Meta (não só a
+    // configuração enviada), antes de permitir qualquer criação de anúncio.
+    const [creative, adset] = await Promise.all([
+      graph<{ id: string; product_set_id?: string }>(creativeId, {
+        params: { fields: "id,product_set_id" }, auth,
+      }),
+      graph<{ id: string; promoted_object?: { product_set_id?: string } }>(adsetId, {
+        params: { fields: "id,promoted_object" }, auth,
+      }),
+    ]);
+    if (!productSetId || creative.product_set_id !== productSetId) {
+      throw new MetaError(
+        `O criativo ${creativeId} não contém na Meta o conjunto de produtos esperado (${productSetId ?? "ausente"}).`
+      );
+    }
+    if (adset.promoted_object?.product_set_id) {
+      throw new MetaError(
+        "A Meta fixou um grupo de produtos geral no conjunto de anúncios. Não é seguro criar anúncios com vídeos diferentes."
+      );
+    }
+  }
   try {
     await createIn(auth, `${d.accountId}/ads`, {
       name: String(ctx.job.input.adName),
