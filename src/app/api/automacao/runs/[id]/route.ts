@@ -1,4 +1,4 @@
-import { getRunView, tick } from "@/lib/automacao/engine";
+import { getRunView, runDueSchedules, tick } from "@/lib/automacao/engine";
 import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -28,6 +28,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       ? job.result.scheduleIds.filter((value: unknown): value is string => typeof value === "string")
       : [];
     if (ids.length) {
+      // Fallback do plano gratuito: com esta tela aberta, tarefas vencidas
+      // são enfileiradas sem cron externo. A ação é idempotente.
+      try {
+        await runDueSchedules({ scheduleIds: ids });
+      } catch (e: any) {
+        tickError = tickError ?? String(e?.message ?? e);
+      }
       const { count } = await db().from("catalog_schedules").select("id", { count: "exact", head: true })
         .in("id", ids).eq("update_type", "set_media").eq("active", true);
       hasPendingVideos = (count ?? 0) > 0;
