@@ -1,7 +1,7 @@
 import "server-only";
 import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile, listAllPages } from "../profiles";
-import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
+import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, resolveCatalogBusiness, sharePixel } from "./meta-ads";
 import { getMedia, getMediaMany } from "./media";
 import { adsetGroupsFor, normalizeDraft, validateDraft, type DraftData, type PageLite } from "./types";
 import { createRun, kick, retryRun as queueRetry, tick, type JobSpec } from "./queue";
@@ -243,8 +243,14 @@ export async function checkBeforePublish(d: DraftData): Promise<string[]> {
       }
     }
     if (autoCatalog && profile) {
-      const bm = await accountBusiness(authOf(profile), d.accountId).catch(() => undefined);
-      if (bm === null) errors.push(`A conta ${acc.name} não está em nenhum Business Manager que o perfil conectado enxergue (nem como dona, nem como conta de cliente/parceiro); o catálogo automático precisa de um BM.`);
+      try {
+        await resolveCatalogBusiness(authOf(profile), d.accountId, d.catalog.businessId ?? "");
+        if (profile.scopes.length && !profile.scopes.includes("catalog_management")) {
+          errors.push(`O perfil ${profile.name} não tem a permissão catalog_management, necessária para criar ou editar catálogos. Reconecte o perfil com essa permissão.`);
+        }
+      } catch (e: any) {
+        errors.push(e?.message ?? "Não foi possível identificar a BM parceira do catálogo.");
+      }
     }
   }
   return errors;
