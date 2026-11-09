@@ -84,6 +84,14 @@ registerExecutor("adset", async (ctx) => {
   if (!campaignId) throw new Error("A campanha ainda não foi criada.");
   const a = d.adset;
   const c = d.campaign;
+  const productSetKey = ctx.job.input.productSetKey as string | undefined;
+  const ownProductSetId = productSetKey ? ctx.done[productSetKey]?.id : undefined;
+  if (productSetKey && !ownProductSetId) throw new Error("Conjunto de produtos específico do anúncio não encontrado.");
+  const adsetCount = Number(ctx.job.input.adsetCount ?? 1);
+  const adsetIndex = Number(ctx.job.input.adsetIndex ?? 1);
+  if (!Number.isInteger(adsetCount) || adsetCount < 1 || !Number.isInteger(adsetIndex) || adsetIndex < 1 || adsetIndex > adsetCount) {
+    throw new Error("Distribuição de orçamento dos conjuntos inválida.");
+  }
   const auth = await authForAccount(d.accountId);
   const tz = await accountTz(d.accountId);
 
@@ -116,7 +124,7 @@ registerExecutor("adset", async (ctx) => {
   }
 
   const params: Record<string, unknown> = {
-    name: a.name.trim(),
+    name: String(ctx.job.input.adsetName || a.name.trim()),
     campaign_id: campaignId,
     status: c.status,
     billing_event: "IMPRESSIONS",
@@ -125,11 +133,16 @@ registerExecutor("adset", async (ctx) => {
   };
   if (["OFFSITE_CONVERSIONS", "VALUE", "LINK_CLICKS", "LANDING_PAGE_VIEWS"].includes(a.optimizationGoal)) params.destination_type = "WEBSITE";
   const catalog = d.creative.mode === "catalog";
-  if (catalog) params.promoted_object = { product_set_id: a.productSetId, ...(a.pixelId ? { pixel_id: a.pixelId, custom_event_type: a.event } : {}) };
+  if (catalog) params.promoted_object = { product_set_id: ownProductSetId || a.productSetId, ...(a.pixelId ? { pixel_id: a.pixelId, custom_event_type: a.event } : {}) };
   else if (NEEDS_PIXEL.has(a.optimizationGoal)) params.promoted_object = { pixel_id: a.pixelId, custom_event_type: a.event };
 
   if (c.budgetLevel === "adset") {
-    params[c.budgetType === "lifetime" ? "lifetime_budget" : "daily_budget"] = cents(a.budget);
+    // Não multiplicar o gasto ao criar um conjunto por anúncio.
+    // Repartir o orçamento original em centavos, distribuindo também o resto.
+    const totalCents = cents(a.budget);
+    const dividedCents = Math.floor(totalCents / adsetCount) + (adsetIndex <= totalCents % adsetCount ? 1 : 0);
+    if (dividedCents <= 0) throw new Error("Orçamento insuficiente para a quantidade de anúncios selecionada.");
+    params[c.budgetType === "lifetime" ? "lifetime_budget" : "daily_budget"] = dividedCents;
     params.bid_strategy = c.bidStrategy;
   }
   if (needsBidAmount(c.bidStrategy)) params.bid_amount = cents(a.bidAmount);
@@ -140,7 +153,11 @@ registerExecutor("adset", async (ctx) => {
   if (end) params.end_time = end;
 
   const r = await createOnce(ctx, auth, d.accountId, "adsets", params);
-  return { status: "done", metaId: r.id, result: { id: r.id }, message: r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Conjunto ${r.id}` };
+  return { status: "done", metaId: r.id,
+    result: { id: r.id, product_set_id: ownProductSetId || a.productSetId },
+    message: (r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Conjunto ${r.id}`) +
+      (adsetCount > 1 ? ` · orçamento dividido entre ${adsetCount} conjuntos` : ""),
+  };
 });
 
 registerExecutor("media", async (ctx) => {
@@ -251,34 +268,39 @@ registerExecutor("creative", async (ctx) => {
   const setKey = ctx.job.input.productSetKey as string | undefined;
   if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
   const r = await makeCreative(ctx, d, auth, media, setKey ? ctx.done[setKey].id : undefined);
-  return { status: "done", metaId: r.id, result: { id: r.id }, message: `Criativo ${r.id}` };
+  return { status: "done", metaId: r.id,
+    result: { id: r.id, product_set_id: setKey ? ctx.done[setKey].id : d.adset.productSetId },
+    message: `Criativo ${r.id}`,
+  };
 });
-
-/** A Meta recusou o conjunto de produtos do criativo por não ser igual/subconjunto do conjunto de anúncios. */
-const PRODUCT_SET_MISMATCH = /conjunto de produtos incompat|subconjunto de promoted_object|product set.*(incompatible|subset)|subset of the promoted_object/i;
 
 registerExecutor("ad", async (ctx) => {
   const d = draftOf(ctx);
-  const adsetId = ctx.done.adset?.id;
-  let creativeId = ctx.done[String(ctx.job.input.creativeKey)]?.id;
+  const adsetKey = String(ctx.job.input.adsetKey || "adset");
+  const adsetId = ctx.done[adsetKey]?.id as string | undefined;
+  const creativeKey = String(ctx.job.input.creativeKey);
+  const creativeId = ctx.done[creativeKey]?.id as string | undefined;
   if (!adsetId || !creativeId) throw new Error("Conjunto ou criativo ainda não criados.");
-  const auth = await authForAccount(d.accountId);
-  const create = (creative: string) =>
-    createOnce(ctx, auth, d.accountId, "ads", { name: String(ctx.job.input.adName), adset_id: adsetId, creative: { creative_id: creative }, status: d.campaign.status });
-  let note = "";
-  let r;
-  try {
-    r = await create(creativeId);
-  } catch (e: any) {
-    // Um anúncio por criativo: se a Meta não aceitar o conjunto de produtos só do criativo,
-    // refaz o criativo com o conjunto de produtos do próprio conjunto de anúncios
-    const setId = ctx.done.product_set?.id;
-    if (!(d.creative.mode === "catalog" && setId && PRODUCT_SET_MISMATCH.test(String(e?.message ?? "")))) throw e;
-    creativeId = (await makeCreative(ctx, d, auth, null, setId)).id;
-    r = await create(creativeId);
-    note = " · com o conjunto de produtos da campanha (a Meta não aceitou o do criativo)";
+
+  const productSetKey = ctx.job.input.productSetKey as string | undefined;
+  if (productSetKey) {
+    const expected = ctx.done[productSetKey]?.id;
+    if (!expected || ctx.done[adsetKey]?.product_set_id !== expected || ctx.done[creativeKey]?.product_set_id !== expected) {
+      throw new MetaError("Vínculo entre anúncio, criativo e conjunto de produtos não corresponde ao vídeo selecionado.");
+    }
   }
-  return { status: "done", metaId: r.id, result: { id: r.id, creative_id: creativeId }, message: (r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}`) + note };
+  const auth = await authForAccount(d.accountId);
+  // Não voltar ao conjunto geral da campanha em caso de incompatibilidade.
+  // Isso misturava os vídeos de vários anúncios no mesmo produto dinâmico.
+  const r = await createOnce(ctx, auth, d.accountId, "ads", {
+    name: String(ctx.job.input.adName), adset_id: adsetId,
+    creative: { creative_id: creativeId }, status: d.campaign.status,
+  });
+  return {
+    status: "done", metaId: r.id,
+    result: { id: r.id, creative_id: creativeId, adset_id: adsetId, product_set_id: productSetKey ? ctx.done[productSetKey].id : undefined },
+    message: r.reused ? "Já criado na tentativa anterior (reaproveitado)" : `Anúncio ${r.id}`,
+  };
 });
 
 /**
