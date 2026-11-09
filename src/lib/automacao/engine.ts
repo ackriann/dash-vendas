@@ -518,10 +518,21 @@ export interface ScheduleRow {
   last_result: string | null;
 }
 
-/** Enfileira as automações de catálogo que chegaram na hora (chamado pelo agendador). */
-export async function runDueSchedules(): Promise<string[]> {
+/** Enfileira as automações de catálogo.
+ * Por padrão executa somente tarefas vencidas (cron).
+ * Uma ação manual autenticada pode selecionar IDs específicos e executá-los agora.
+ */
+export async function runDueSchedules(options: { scheduleIds?: string[]; executeNow?: boolean } = {}): Promise<string[]> {
   const now = new Date();
-  const { data } = await db().from("catalog_schedules").select("*").eq("active", true).lte("next_run_at", now.toISOString()).limit(20);
+  // Nunca permitir ignorar o horário sem especificar tarefas do workspace.
+  if (options.executeNow && !options.scheduleIds?.length) {
+    throw new Error("Selecione um agendamento para executar agora.");
+  }
+  let query = db().from("catalog_schedules").select("*").eq("active", true);
+  if (options.scheduleIds?.length) query = query.in("id", options.scheduleIds);
+  if (!options.executeNow) query = query.lte("next_run_at", now.toISOString());
+  const { data, error } = await query.limit(20);
+  if (error) throw new Error(error.message);
   const out: string[] = [];
   for (const s of (data ?? []) as ScheduleRow[]) {
     try {
@@ -561,7 +572,9 @@ export async function runDueSchedules(): Promise<string[]> {
         profileId: s.profile_id,
         catalogId: s.catalog_id,
         items,
-        idemKey: `sched:${s.id}:${s.next_run_at}`,
+        // Uma atualização única mantém a mesma chave no agendamento automático ou manual.
+        // Cliques repetidos não podem reenviar o mesmo lote acidentalmente.
+        idemKey: s.update_type === "set_media" ? `sched:${s.id}:once` : `sched:${s.id}:${s.next_run_at}`,
         scheduleId: s.id,
       });
       // Próxima execução: pula horários perdidos (sem rajada de atualizações atrasadas)
