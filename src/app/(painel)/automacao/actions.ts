@@ -114,14 +114,13 @@ export async function recoverCatalogPublicationAction(formData: FormData) {
   await requireAuth();
   const id = str(formData, "id");
   if (!/^[0-9a-f-]{36}$/i.test(id)) go("/automacao/processos", "erro", "Processo inválido.");
+  let message: string;
   try {
-    const message = await recoverCatalogPublication(id);
-    go(`/automacao/processos/${id}`, "ok", message);
+    message = await recoverCatalogPublication(id);
   } catch (e: any) {
-    // redirect() lança um erro especial e só é usado fora do try acima.
-    if (e?.digest?.startsWith("NEXT_REDIRECT")) throw e;
     go(`/automacao/processos/${id}`, "erro", e?.message ?? "Não foi possível recuperar a publicação.");
   }
+  go(`/automacao/processos/${id}`, "ok", message);
 }
 
 /** "Corrigir e continuar" na tela do processo: ajusta Página, Instagram, link e textos e segue de onde parou. */
