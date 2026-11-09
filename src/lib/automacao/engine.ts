@@ -208,7 +208,7 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       const media = await getMediaMany(d.creative.mediaIds);
       media.forEach((m, i) => {
         const ids = products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId);
-        if (ids.length) jobs.push({ key: `product_set:${i + 1}`, kind: "product_set", label: `Conjunto de produtos · ${m.name}`, input: { retailerIds: ids, suffix: m.name } });
+        if (ids.length) jobs.push({ key: `product_set:${i + 1}`, kind: "product_set", label: `Conjunto de produtos · ${m.name}`, input: { retailerIds: ids, suffix: `${i + 1} · ${m.id.slice(0, 8)} · ${m.name}` } });
       });
     }
   }
