@@ -1,6 +1,6 @@
 import "server-only";
 import { db, getSetting, setSetting } from "../db";
-import { startOfDayUtc } from "../dates";
+import { BRASILIA_TIME_ZONE, startOfDayUtc } from "../dates";
 import { MetaError, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
@@ -641,7 +641,7 @@ registerExecutor("catalog_video_schedule", async (ctx): Promise<Outcome> => {
     scheduleIds.push(created.id);
     made++;
   }
-  return { status: "done", result: { start, schedules: made, scheduleIds }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: await accountTz(d.accountId), dateStyle: "short", timeStyle: "short" })} — processamento sujeito à Meta` };
+  return { status: "done", result: { start, schedules: made, scheduleIds }, message: `Atualização dos vídeos agendada para ${new Date(start).toLocaleString("pt-BR", { timeZone: BRASILIA_TIME_ZONE, dateStyle: "short", timeStyle: "short" })} (Brasília, UTC−3) — processamento sujeito à Meta` };
 });
 
 onRunFinished("catalog_update", async (run, jobs) => {
