@@ -23,7 +23,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
 
   useEffect(() => setRun(initial), [initial]);
   useEffect(() => setPendingVideos(hasPendingVideos), [hasPendingVideos]);
-  const live = LIVE.has(run.status);
+  const live = LIVE.has(run.status) || pendingVideos;
 
   useEffect(() => {
     let stop = false;
@@ -35,10 +35,12 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
         if (typeof j.hasPendingVideos === "boolean") setPendingVideos(j.hasPendingVideos);
         setTickError(j.tickError ?? null);
         setOffline(false);
-        if (!stop && LIVE.has(j.run?.status)) timer.current = setTimeout(poll, 1500);
+        if (!stop && (LIVE.has(j.run?.status) || j.hasPendingVideos)) {
+          timer.current = setTimeout(poll, LIVE.has(j.run?.status) ? 1500 : 15000);
+        }
       } catch {
         setOffline(true);
-        if (!stop) timer.current = setTimeout(poll, 4000);
+        if (!stop) timer.current = setTimeout(poll, 15000);
       }
     }
     if (live) poll();
@@ -71,7 +73,10 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
           {offline && <span className="text-spend"> · sem conexão, tentando de novo…</span>}
         </p>
         {tickError && <p className="notice notice-err">{tickError}</p>}
-        {!finished && <p className="text-xs text-muted">Pode fechar esta tela: o processo continua no servidor e você volta aqui em Processos.</p>}
+        {!finished && <p className="text-xs text-muted">
+          A publicação continua no servidor. Com esta tela aberta, os vídeos agendados também são verificados automaticamente.
+          Para executar o delay mesmo com o painel fechado, configure o cron gratuito em Regras.
+        </p>}
       </section>
 
       <section className="panel panel-pad">
