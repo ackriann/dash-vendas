@@ -352,9 +352,40 @@ export async function toggleScheduleAction(formData: FormData) {
 export async function runScheduleNowAction(formData: FormData) {
   await requireAuth();
   const back = backOf(formData, "/automacao/catalogos");
-  await db().from("catalog_schedules").update({ next_run_at: new Date().toISOString() }).eq("id", str(formData, "id")).eq("active", true);
-  const r = await runDueSchedules();
-  go(back, "ok", r.length ? r.join(" · ") : "Nada para executar (automação pausada?).");
+  const scheduleId = str(formData, "id");
+  const { data: schedule } = await db().from("catalog_schedules").select("id,active").eq("id", scheduleId).maybeSingle();
+  if (!schedule) go(back, "erro", "Agendamento não encontrado nesta conta.");
+  if (!schedule.active) go(back, "erro", "Esta atualização já foi executada ou está pausada.");
+  const r = await runDueSchedules({ scheduleIds: [scheduleId], executeNow: true });
+  go(back, r.length && !r[0].includes(": Erro") ? "ok" : "erro", r.join(" · ") || "Não foi possível enfileirar a atualização.");
+}
+
+/** Ação manual para a tela do processo: não exige cron nem aguarda o delay. */
+export async function updateScheduledVideosNowAction(formData: FormData) {
+  await requireAuth();
+  const runId = str(formData, "run_id");
+  const back = `/automacao/processos/${runId}`;
+  if (!/^[0-9a-f-]{36}$/i.test(runId)) go("/automacao/processos", "erro", "Processo inválido.");
+
+  const { data: run } = await db().from("ops_runs").select("id,kind").eq("id", runId).maybeSingle();
+  if (!run || run.kind !== "publish") go(back, "erro", "Processo de publicação não encontrado.");
+
+  const { data: job } = await db().from("ops_jobs").select("status,result").eq("run_id", runId).eq("key", "video_schedule").maybeSingle();
+  if (!job || job.status !== "done") go(back, "erro", "Os vídeos ainda não foram programados.");
+
+  const scheduleIds = Array.isArray(job.result?.scheduleIds)
+    ? job.result.scheduleIds.filter((v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v))
+    : [];
+  if (!scheduleIds.length) go(back, "erro", "Nenhum agendamento de vídeo foi encontrado.");
+
+  const { data: active } = await db().from("catalog_schedules")
+    .select("id").in("id", scheduleIds).eq("update_type", "set_media").eq("active", true);
+  const ids = (active ?? []).map((s) => s.id);
+  if (!ids.length) go(back, "erro", "Os vídeos já foram enviados, ou o agendamento foi pausado.");
+  const results = await runDueSchedules({ scheduleIds: ids, executeNow: true });
+  const failed = results.some((s) => s.includes(": Erro"));
+  go(back, results.length && !failed ? "ok" : "erro",
+    results.join(" · ") || "Não foi possível enfileirar a atualização.");
 }
 
 export async function deleteScheduleAction(formData: FormData) {
