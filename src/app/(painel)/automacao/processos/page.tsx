@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { env } from "@/lib/env";
-import { fmtDateTime } from "@/lib/dates";
+import { BRASILIA_TIME_ZONE, fmtDateTime } from "@/lib/dates";
 import { jobCounts, listRuns } from "@/lib/automacao/engine";
 import { RUN_KIND_LABEL } from "@/lib/automacao/types";
 import { RunPill } from "@/components/automacao/JobStatus";
@@ -12,7 +11,7 @@ export default async function Processos({ searchParams }: { searchParams: Promis
   const kind = KINDS.some(([k]) => k === sp.tipo) ? sp.tipo : "";
   const runs = await listRuns(100, kind || undefined).catch(() => []);
   const counts = await jobCounts(runs.map((r) => r.id));
-  const tz = env.timezone;
+  const tz = BRASILIA_TIME_ZONE;
 
   return (
     <div className="space-y-4">
