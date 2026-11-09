@@ -344,8 +344,11 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
     if (s.advantageAudience && (s.ageMinControl < 18 || s.ageMinControl > 25)) e[2].push(pre + "idade mínima Advantage+ inválida.");
     if (s.placements === "manual" && !s.platforms.length) e[2].push(pre + "escolha posicionamentos.");
     if (catalog && !isAutoCat && !s.productSetId) e[2].push(pre + "escolha o conjunto de produtos.");
-    if (isAutoCat && d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1) {
-      e[3].push(pre + "o catálogo dinâmico pode repetir o mesmo vídeo entre anúncios deste conjunto. Para 1 conjunto com vídeos diferentes e fixos, selecione anúncios de Imagem/Vídeo, ou use apenas um criativo de catálogo por conjunto.");
+    // Catálogo dinâmico com vários anúncios no mesmo conjunto:
+    // testaremos um product set exclusivo por criativo na API da Meta.
+    // É um formato dependente da conta, por isso o primeiro teste deve nascer PAUSADO.
+    if (isAutoCat && d.catalog.adsMode === "per_creative" && group.mediaIds.length > 1 && c.status !== "PAUSED") {
+      e[3].push(pre + "para testar vídeos individuais em um único conjunto de catálogo, publique inicialmente como Pausada. O painel verificará a compatibilidade na API da Meta antes de criar os anúncios.");
     }
     if (!catalog || isAutoCat) {
       if (!group.mediaIds.length) e[3].push(pre + "selecione pelo menos um criativo.");
