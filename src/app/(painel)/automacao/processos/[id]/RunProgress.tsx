@@ -15,12 +15,13 @@ const LIVE = new Set(["queued", "running"]);
  * também avança a fila. Recarregar a página ou perder a conexão não duplica nada:
  * o estado está no banco e cada operação é travada enquanto executa.
  */
-export default function RunProgress({ initial, back, hasPendingVideos = false, initialVideoUpdates = [], canRecoverCatalog = false }: {
+export default function RunProgress({ initial, back, hasPendingVideos = false, initialVideoUpdates = [], canRecoverCatalog = false, hasCatalogBusinessError = false }: {
   initial: RunView;
   back?: { href: string; label: string } | null;
   hasPendingVideos?: boolean;
   initialVideoUpdates?: VideoUpdateRow[];
   canRecoverCatalog?: boolean;
+  hasCatalogBusinessError?: boolean;
 }) {
   const [run, setRun] = useState(initial);
   const [pendingVideos, setPendingVideos] = useState(hasPendingVideos);
@@ -166,7 +167,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
             </SubmitButton>
           </form>
         )}
-        {(run.status === "canceled" || (run.status === "failed" && !canRecoverCatalog)) && (
+        {(run.status === "canceled" || (run.status === "failed" && !canRecoverCatalog && !hasCatalogBusinessError)) && (
           <form action={retryRunAction}>
             <input type="hidden" name="id" value={run.id} />
             <SubmitButton className="btn btn-primary" pendingText="Recolocando…">Tentar de novo</SubmitButton>
@@ -186,9 +187,11 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
       </div>
       {finished && run.status === "failed" && (
         <p className="sub">
-          {canRecoverCatalog
-            ? "Este processo referencia um conjunto de anúncios antigo e incompatível com produtos individuais. Use a recuperação acima para manter a campanha e criar um conjunto corrigido dentro dela. O anterior não será apagado nem alterado."
-            : "Tentar de novo preserva as operações concluídas. Para alterar a configuração, use Corrigir no rascunho."}
+          {hasCatalogBusinessError
+            ? "A BM utilizada para o catálogo pode estar incorreta. Selecione a BM parceira na seção abaixo e use Corrigir BM e continuar."
+            : canRecoverCatalog
+              ? "Este processo referencia um conjunto de anúncios antigo e incompatível com produtos individuais. Use a recuperação acima para manter a campanha e criar um conjunto corrigido dentro dela. O anterior não será apagado nem alterado."
+              : "Tentar de novo preserva as operações concluídas. Para alterar a configuração, use Corrigir no rascunho."}
         </p>
       )}
     </div>
