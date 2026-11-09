@@ -210,6 +210,27 @@ export interface DraftData {
     adName: string; // aceita {n} e {midia}
   };
   catalog: CatalogAuto;
+  /** Grupos configurados pelo operador. Vazio = um conjunto com todas as mídias. */
+  adsetGroups?: AdsetGroup[];
+}
+
+export interface AdsetGroup {
+  id: string;
+  settings: DraftData["adset"];
+  mediaIds: string[];
+}
+
+export function adsetGroupsFor(d: DraftData): AdsetGroup[] {
+  return d.adsetGroups?.length ? d.adsetGroups : [{ id: "1", settings: d.adset, mediaIds: d.creative.mediaIds }];
+}
+
+export function adsPerGroup(d: DraftData, g: AdsetGroup): number {
+  return d.creative.mode === "catalog" && (d.catalog.source !== "auto" || d.catalog.adsMode !== "per_creative") ? 1 : g.mediaIds.length;
+}
+
+export function draftStructure(d: DraftData): { adsets: number; ads: number } {
+  const groups = adsetGroupsFor(d);
+  return { adsets: groups.length, ads: groups.reduce((sum, g) => sum + adsPerGroup(d, g), 0) };
 }
 
 export const RECOMMENDED_URL_TAGS =
@@ -271,6 +292,7 @@ export function emptyDraft(accountId = ""): DraftData {
       adName: "{midia}",
     },
     catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", images: {}, adsMode: "single", preferVideo: true },
+    adsetGroups: [],
   };
 }
 
@@ -284,6 +306,11 @@ export function normalizeDraft(raw: unknown, accountId = ""): DraftData {
     campaign: { ...d.campaign, ...(r.campaign ?? {}) },
     adset: { ...d.adset, ...(r.adset ?? {}) },
     creative: { ...d.creative, ...(r.creative ?? {}) },
+    adsetGroups: Array.isArray(r.adsetGroups) ? r.adsetGroups.map((g, i) => ({
+      id: String(g.id || (i + 1)),
+      settings: { ...d.adset, ...(r.adset ?? {}), ...(g.settings ?? {}) },
+      mediaIds: Array.isArray(g.mediaIds) ? g.mediaIds.filter((id): id is string => typeof id === "string") : [],
+    })) : [],
     // Rascunho antigo de catálogo já tinha catálogo escolhido: continua no modo manual
     catalog: { ...d.catalog, ...(r.catalog ?? (r.campaign?.catalogId ? { source: "existing" } : {})) },
   };
@@ -298,6 +325,30 @@ export function validateDraft(d: DraftData): Record<1 | 2 | 3, string[]> {
   const a = d.adset;
   const cr = d.creative;
   const catalog = cr.mode === "catalog";
+  const groups = adsetGroupsFor(d);
+  if (groups.length < 1 || groups.length > 30) e[2].push("Selecione entre 1 e 30 conjuntos de anúncios.");
+  if (new Set(groups.map((g) => g.id)).size !== groups.length) e[2].push("Existem conjuntos com identificadores repetidos.");
+  const isAutoCat = catalog && d.catalog.source === "auto";
+  for (const [i, group] of groups.entries()) {
+    const s = group.settings;
+    const pre = `Conjunto ${i + 1}: `;
+    if (!s.name?.trim()) e[2].push(pre + "informe um nome.");
+    if (!GOALS[c.objective].some(([goal]) => goal === s.optimizationGoal)) e[2].push(pre + "otimização incompatível.");
+    if (NEEDS_PIXEL.has(s.optimizationGoal) && !s.pixelId) e[2].push(pre + "escolha um pixel.");
+    if (c.budgetLevel === "adset" && !(Number(s.budget) > 0)) e[2].push(pre + "informe o orçamento.");
+    if (needsBidAmount(c.bidStrategy) && !(Number(s.bidAmount) > 0)) e[2].push(pre + "informe o lance.");
+    if (c.budgetType === "lifetime" && !s.endTime) e[2].push(pre + "informe o término.");
+    if (s.startTime && s.endTime && s.endTime <= s.startTime) e[2].push(pre + "término anterior ao início.");
+    if (!s.countries.length && !s.regions.length) e[2].push(pre + "escolha um país ou região.");
+    if (s.ageMin < 13 || s.ageMax > 65 || s.ageMin > s.ageMax) e[2].push(pre + "faixa etária inválida.");
+    if (s.advantageAudience && (s.ageMinControl < 18 || s.ageMinControl > 25)) e[2].push(pre + "idade mínima Advantage+ inválida.");
+    if (s.placements === "manual" && !s.platforms.length) e[2].push(pre + "escolha posicionamentos.");
+    if (catalog && !isAutoCat && !s.productSetId) e[2].push(pre + "escolha o conjunto de produtos.");
+    if (!catalog || isAutoCat) {
+      if (!group.mediaIds.length) e[3].push(pre + "selecione pelo menos um criativo.");
+      if (group.mediaIds.some((id) => !cr.mediaIds.includes(id))) e[3].push(pre + "contém mídia não selecionada na biblioteca.");
+    }
+  }
 
   if (!d.accountId) e[1].push("Escolha a conta de anúncio.");
   if (!c.name.trim()) e[1].push("Dê um nome para a campanha.");
