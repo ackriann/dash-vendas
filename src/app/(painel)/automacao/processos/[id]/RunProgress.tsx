@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { JOB_STATUS_LABEL, RUN_KIND_LABEL, type RunView } from "@/lib/automacao/types";
 import { JobPill, RunPill } from "@/components/automacao/JobStatus";
 import SubmitButton from "@/components/SubmitButton";
-import { cancelRunAction, retryRunAction, updateScheduledVideosNowAction } from "../../actions";
+import { cancelRunAction, recoverCatalogPublicationAction, retryRunAction, updateScheduledVideosNowAction } from "../../actions";
 import type { VideoUpdateRow } from "@/lib/automacao/process-groups";
 
 const ICON: Record<string, string> = { pending: "·", running: "↻", waiting_sync: "↻", done: "✓", failed: "!", skipped: "–" };
@@ -15,11 +15,12 @@ const LIVE = new Set(["queued", "running"]);
  * também avança a fila. Recarregar a página ou perder a conexão não duplica nada:
  * o estado está no banco e cada operação é travada enquanto executa.
  */
-export default function RunProgress({ initial, back, hasPendingVideos = false, initialVideoUpdates = [] }: {
+export default function RunProgress({ initial, back, hasPendingVideos = false, initialVideoUpdates = [], canRecoverCatalog = false }: {
   initial: RunView;
   back?: { href: string; label: string } | null;
   hasPendingVideos?: boolean;
   initialVideoUpdates?: VideoUpdateRow[];
+  canRecoverCatalog?: boolean;
 }) {
   const [run, setRun] = useState(initial);
   const [pendingVideos, setPendingVideos] = useState(hasPendingVideos);
@@ -156,7 +157,16 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
             </SubmitButton>
           </form>
         )}
-        {(run.status === "failed" || run.status === "canceled") && (
+        {run.status === "failed" && canRecoverCatalog && (
+          <form action={recoverCatalogPublicationAction}>
+            <input type="hidden" name="id" value={run.id} />
+            <SubmitButton className="btn btn-primary" pendingText="Recuperando…"
+              confirm="Recuperar esta publicação? A campanha, o catálogo e os produtos existentes serão preservados. Será criado UM novo conjunto de anúncios pausado dentro da mesma campanha. O conjunto antigo permanecerá pausado e o processo validará novamente os vídeos.">
+              Recuperar conjunto na campanha original
+            </SubmitButton>
+          </form>
+        )}
+        {(run.status === "canceled" || (run.status === "failed" && !canRecoverCatalog)) && (
           <form action={retryRunAction}>
             <input type="hidden" name="id" value={run.id} />
             <SubmitButton className="btn btn-primary" pendingText="Recolocando…">Tentar de novo</SubmitButton>
@@ -175,7 +185,11 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
         {back && <Link className="btn" href={back.href}>{back.label}</Link>}
       </div>
       {finished && run.status === "failed" && (
-        <p className="sub">Tentar de novo continua de onde parou: campanha, conjunto e mídias já criados são reaproveitados, nada é duplicado.{run.kind === "publish" ? " Para ajustar algo antes, use “Corrigir e continuar aqui” logo abaixo." : ""}</p>
+        <p className="sub">
+          {canRecoverCatalog
+            ? "Este processo ainda referencia um conjunto de anúncios antigo, incompatível com produtos individuais. Use a recuperação acima: ela mantém a campanha e cria um conjunto corrigido dentro dela. O conjunto antigo não será apagado."
+            : "Tentar de novo preserva as operações concluídas. Para alterar a configuração, use Corrigir no rascunho."}
+        </p>
       )}
     </div>
   );
