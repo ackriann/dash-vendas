@@ -358,7 +358,8 @@ onRunFinished("publish", async (run, jobs) => {
   if (!run.ref_id) return;
   const ids = {
     campaign_id: jobs.find((j) => j.key === "campaign")?.meta_id ?? null,
-    adset_id: jobs.find((j) => j.key === "adset")?.meta_id ?? null,
+    adset_id: jobs.find((j) => j.key === "adset" || j.key.startsWith("adset:"))?.meta_id ?? null,
+    adset_ids: jobs.filter((j) => j.key === "adset" || j.key.startsWith("adset:")).map((j) => j.meta_id).filter(Boolean),
     ad_ids: jobs.filter((j) => j.key.startsWith("ad:")).map((j) => j.meta_id).filter(Boolean),
   };
   await db().from("ops_runs").update({ summary: { ...run.summary, ids } }).eq("id", run.id);
