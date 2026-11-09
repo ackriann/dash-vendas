@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { JOB_STATUS_LABEL, RUN_KIND_LABEL, type RunView } from "@/lib/automacao/types";
 import { JobPill, RunPill } from "@/components/automacao/JobStatus";
 import SubmitButton from "@/components/SubmitButton";
-import { cancelRunAction, retryRunAction } from "../../actions";
+import { cancelRunAction, retryRunAction, updateScheduledVideosNowAction } from "../../actions";
 
 const ICON: Record<string, string> = { pending: "·", running: "↻", waiting_sync: "↻", done: "✓", failed: "!", skipped: "–" };
 const LIVE = new Set(["queued", "running"]);
@@ -14,7 +14,7 @@ const LIVE = new Set(["queued", "running"]);
  * também avança a fila. Recarregar a página ou perder a conexão não duplica nada:
  * o estado está no banco e cada operação é travada enquanto executa.
  */
-export default function RunProgress({ initial, back }: { initial: RunView; back?: { href: string; label: string } | null }) {
+export default function RunProgress({ initial, back, hasPendingVideos = false }: { initial: RunView; back?: { href: string; label: string } | null; hasPendingVideos?: boolean }) {
   const [run, setRun] = useState(initial);
   const [offline, setOffline] = useState(false);
   const [tickError, setTickError] = useState<string | null>(null);
@@ -92,6 +92,14 @@ export default function RunProgress({ initial, back }: { initial: RunView; back?
       </section>
 
       <div className="flex flex-wrap gap-2">
+        {hasPendingVideos && run.kind === "publish" && (
+          <form action={updateScheduledVideosNowAction}>
+            <input type="hidden" name="run_id" value={run.id} />
+            <SubmitButton className="btn btn-primary" pendingText="Enviando atualização…" confirm="Enviar agora a atualização dos produtos com vídeo? A Meta pode processar e revisar os vídeos novamente.">
+              Atualizar vídeos agora
+            </SubmitButton>
+          </form>
+        )}
         {(run.status === "failed" || run.status === "canceled") && (
           <form action={retryRunAction}>
             <input type="hidden" name="id" value={run.id} />
