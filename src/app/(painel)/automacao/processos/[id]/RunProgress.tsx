@@ -16,11 +16,13 @@ const LIVE = new Set(["queued", "running"]);
  */
 export default function RunProgress({ initial, back, hasPendingVideos = false }: { initial: RunView; back?: { href: string; label: string } | null; hasPendingVideos?: boolean }) {
   const [run, setRun] = useState(initial);
+  const [pendingVideos, setPendingVideos] = useState(hasPendingVideos);
   const [offline, setOffline] = useState(false);
   const [tickError, setTickError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => setRun(initial), [initial]);
+  useEffect(() => setPendingVideos(hasPendingVideos), [hasPendingVideos]);
   const live = LIVE.has(run.status);
 
   useEffect(() => {
@@ -30,6 +32,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
         const r = await fetch(`/api/automacao/runs/${initial.id}`, { cache: "no-store" });
         const j = await r.json();
         if (j.run) setRun(j.run);
+        if (typeof j.hasPendingVideos === "boolean") setPendingVideos(j.hasPendingVideos);
         setTickError(j.tickError ?? null);
         setOffline(false);
         if (!stop && LIVE.has(j.run?.status)) timer.current = setTimeout(poll, 1500);
@@ -92,7 +95,7 @@ export default function RunProgress({ initial, back, hasPendingVideos = false }:
       </section>
 
       <div className="flex flex-wrap gap-2">
-        {hasPendingVideos && run.kind === "publish" && (
+        {pendingVideos && run.kind === "publish" && (
           <form action={updateScheduledVideosNowAction}>
             <input type="hidden" name="run_id" value={run.id} />
             <SubmitButton className="btn btn-primary" pendingText="Enviando atualização…" confirm="Enviar agora a atualização dos produtos com vídeo? A Meta pode processar e revisar os vídeos novamente.">
