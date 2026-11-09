@@ -212,18 +212,36 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       });
     }
   }
-  jobs.push(
-    { key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` },
-    { key: "adset", kind: "adset", label: `Criação do conjunto · ${d.adset.name}` },
-  );
+  jobs.push({ key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` });
   if (autoCatalog && d.catalog.adsMode === "per_creative") {
+    // Cada criativo recebe um conjunto de anúncios promovendo SOMENTE seus produtos.
+    // A Meta pode exigir que o product_set_id do anúncio seja igual ao do conjunto.
+    // O fallback antigo para o conjunto geral misturava vídeos de anúncios distintos.
     const media = await getMediaMany(d.creative.mediaIds);
     media.forEach((m, i) => {
       const n = i + 1;
       const adName = adNameFor(d.creative.adName, n, m.name, media.length);
-      jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo de catálogo · ${adName}`, input: { adName, productSetKey: `product_set:${n}` } });
-      jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
+      const productSetKey = `product_set:${n}`;
+      const adsetKey = `adset:${n}`;
+      jobs.push({
+        key: adsetKey,
+        kind: "adset",
+        label: `Conjunto do anúncio · ${adName}`,
+        input: {
+          productSetKey,
+          adsetName: `${d.adset.name.trim()} · ${n} · ${m.name}`.slice(0, 250),
+          adsetCount: media.length,
+          adsetIndex: n,
+        },
+      });
+      jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo de catálogo · ${adName}`, input: { adName, productSetKey, mediaId: m.id } });
+      jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}`, adsetKey, productSetKey, mediaId: m.id } });
     });
+  } else {
+    jobs.push({ key: "adset", kind: "adset", label: `Criação do conjunto · ${d.adset.name}` });
+  }
+  if (autoCatalog && d.catalog.adsMode === "per_creative") {
+    // A criação de cada anúncio já foi adicionada acima, com conjunto isolado.
   } else if (d.creative.mode === "catalog") {
     const adName = adNameFor(d.creative.adName.replace("{midia}", "Catálogo"), 1, null, 1);
     jobs.push({ key: "creative:1", kind: "creative", label: `Criativo de catálogo`, input: { adName } });
