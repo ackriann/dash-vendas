@@ -33,8 +33,12 @@ export default async function Processos({ searchParams }: { searchParams: Promis
     : kind === "page_sync" ? [] : publications;
   const selectedPages = kind === "page_sync" || kind === "" ? pages : [];
   const selectedIndependent = kind === "catalog_update" || kind === "" ? independent : [];
+  const latestActivity = (r: RunRow) => Math.max(
+    Date.parse(r.created_at),
+    ...(byPublication.get(r.id) ?? []).map((update) => Date.parse(update.created_at)),
+  );
   const runs = [...selectedPublications, ...selectedPages, ...selectedIndependent]
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .sort((a, b) => latestActivity(b) - latestActivity(a))
     .slice(0, 150);
   const counts = await jobCounts(runs.map((r) => r.id));
   const tz = env.timezone;
