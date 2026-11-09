@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { JOB_STATUS_LABEL, RUN_KIND_LABEL, type RunView } from "@/lib/automacao/types";
 import { JobPill, RunPill } from "@/components/automacao/JobStatus";
 import SubmitButton from "@/components/SubmitButton";
-import { cancelRunAction, retryRunAction } from "../../actions";
+import { cancelRunAction, retryRunAction, updateScheduledVideosNowAction } from "../../actions";
 
 const ICON: Record<string, string> = { pending: "·", running: "↻", waiting_sync: "↻", done: "✓", failed: "!", skipped: "–" };
 const LIVE = new Set(["queued", "running"]);
@@ -14,14 +14,16 @@ const LIVE = new Set(["queued", "running"]);
  * também avança a fila. Recarregar a página ou perder a conexão não duplica nada:
  * o estado está no banco e cada operação é travada enquanto executa.
  */
-export default function RunProgress({ initial, back }: { initial: RunView; back?: { href: string; label: string } | null }) {
+export default function RunProgress({ initial, back, hasPendingVideos = false }: { initial: RunView; back?: { href: string; label: string } | null; hasPendingVideos?: boolean }) {
   const [run, setRun] = useState(initial);
+  const [pendingVideos, setPendingVideos] = useState(hasPendingVideos);
   const [offline, setOffline] = useState(false);
   const [tickError, setTickError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => setRun(initial), [initial]);
-  const live = LIVE.has(run.status);
+  useEffect(() => setPendingVideos(hasPendingVideos), [hasPendingVideos]);
+  const live = LIVE.has(run.status) || pendingVideos;
 
   useEffect(() => {
     let stop = false;
@@ -30,12 +32,15 @@ export default function RunProgress({ initial, back }: { initial: RunView; back?
         const r = await fetch(`/api/automacao/runs/${initial.id}`, { cache: "no-store" });
         const j = await r.json();
         if (j.run) setRun(j.run);
+        if (typeof j.hasPendingVideos === "boolean") setPendingVideos(j.hasPendingVideos);
         setTickError(j.tickError ?? null);
         setOffline(false);
-        if (!stop && LIVE.has(j.run?.status)) timer.current = setTimeout(poll, 1500);
+        if (!stop && (LIVE.has(j.run?.status) || j.hasPendingVideos)) {
+          timer.current = setTimeout(poll, LIVE.has(j.run?.status) ? 1500 : 15000);
+        }
       } catch {
         setOffline(true);
-        if (!stop) timer.current = setTimeout(poll, 4000);
+        if (!stop) timer.current = setTimeout(poll, 15000);
       }
     }
     if (live) poll();
@@ -68,7 +73,10 @@ export default function RunProgress({ initial, back }: { initial: RunView; back?
           {offline && <span className="text-spend"> · sem conexão, tentando de novo…</span>}
         </p>
         {tickError && <p className="notice notice-err">{tickError}</p>}
-        {!finished && <p className="text-xs text-muted">Pode fechar esta tela: o processo continua no servidor e você volta aqui em Processos.</p>}
+        {!finished && <p className="text-xs text-muted">
+          A publicação continua no servidor. Com esta tela aberta, os vídeos agendados também são verificados automaticamente.
+          Para executar o delay mesmo com o painel fechado, configure o cron gratuito em Regras.
+        </p>}
       </section>
 
       <section className="panel panel-pad">
@@ -92,6 +100,14 @@ export default function RunProgress({ initial, back }: { initial: RunView; back?
       </section>
 
       <div className="flex flex-wrap gap-2">
+        {pendingVideos && run.kind === "publish" && (
+          <form action={updateScheduledVideosNowAction}>
+            <input type="hidden" name="run_id" value={run.id} />
+            <SubmitButton className="btn btn-primary" pendingText="Enviando atualização…" confirm="Enviar agora a atualização dos produtos com vídeo? A Meta pode processar e revisar os vídeos novamente.">
+              Atualizar vídeos agora
+            </SubmitButton>
+          </form>
+        )}
         {(run.status === "failed" || run.status === "canceled") && (
           <form action={retryRunAction}>
             <input type="hidden" name="id" value={run.id} />

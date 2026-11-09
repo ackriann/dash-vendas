@@ -1,4 +1,5 @@
-import { getRunView, tick } from "@/lib/automacao/engine";
+import { getRunView, runDueSchedules, tick } from "@/lib/automacao/engine";
+import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,5 +20,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
   const run = await getRunView(id);
   if (!run) return Response.json({ error: "Processo não encontrado." }, { status: 404 });
-  return Response.json({ run, tickError }, { headers: { "Cache-Control": "no-store" } });
+  let hasPendingVideos = false;
+  if (run.kind === "publish") {
+    const { data: job } = await db().from("ops_jobs").select("status,result")
+      .eq("run_id", id).eq("key", "video_schedule").maybeSingle();
+    const ids: string[] = job?.status === "done" && Array.isArray(job.result?.scheduleIds)
+      ? job.result.scheduleIds.filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    if (ids.length) {
+      // Fallback do plano gratuito: com esta tela aberta, tarefas vencidas
+      // são enfileiradas sem cron externo. A ação é idempotente.
+      try {
+        await runDueSchedules({ scheduleIds: ids });
+      } catch (e: any) {
+        tickError = tickError ?? String(e?.message ?? e);
+      }
+      const { count } = await db().from("catalog_schedules").select("id", { count: "exact", head: true })
+        .in("id", ids).eq("update_type", "set_media").eq("active", true);
+      hasPendingVideos = (count ?? 0) > 0;
+    }
+  }
+  return Response.json({ run, tickError, hasPendingVideos }, { headers: { "Cache-Control": "no-store" } });
 }
