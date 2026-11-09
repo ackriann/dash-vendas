@@ -133,6 +133,9 @@ export interface Region { key: string; name: string; country?: string }
 export interface CatalogAuto {
   /** auto = o painel monta tudo · existing = catálogo e conjunto de produtos escolhidos à mão */
   source: "auto" | "existing";
+  /** BM parceira/proprietária acessível pelo perfil da conta. Sem escolha, usa
+   * automaticamente a única BM parceira; nunca assume BM proprietária sem direito. */
+  businessId: string;
   productsPerCreative: number;
   /** minutos até o vídeo entrar no produto (0 = o vídeo já vai na criação) */
   delayMinutes: number;
@@ -291,7 +294,7 @@ export function emptyDraft(accountId = ""): DraftData {
       catalogFormat: "carousel_images_multi_items",
       adName: "{midia}",
     },
-    catalog: { source: "auto", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", images: {}, adsMode: "single", preferVideo: true },
+    catalog: { source: "auto", businessId: "", productsPerCreative: 1, delayMinutes: 0, price: null, brand: "", productImageId: "", images: {}, adsMode: "single", preferVideo: true },
     adsetGroups: [],
   };
 }

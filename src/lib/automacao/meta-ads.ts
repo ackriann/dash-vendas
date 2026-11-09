@@ -67,26 +67,90 @@ export async function listBusinessCatalogs(auth: MetaAuth, businessId: string): 
  * conta de cliente/parceiro (e que o perfil conectado enxerga).
  */
 export async function accountBusiness(auth: MetaAuth, act: string): Promise<{ id: string; name: string } | null> {
-  const info = await accountInfo(auth, act);
-  if (info.business?.id) return info.business;
-  const [agencies, mine] = await Promise.all([
-    graphAll<{ id: string; name: string }>(`${act}/agencies`, { fields: "id,name" }, auth, 2).catch(() => [] as { id: string; name: string }[]),
-    listBusinesses(auth).catch(() => [] as { id: string; name: string }[]),
+  const choices = await catalogBusinessesForAccount(auth, act);
+  const partners = choices.filter((b) => b.relation === "partner");
+  // Nunca priorize info.business (BM dona) se o perfil possui uma BM parceira.
+  if (partners.length === 1) return partners[0];
+  if (partners.length > 1) return null; // Configuração ambígua: escolha manualmente para catálogos.
+  return choices.find((b) => b.relation === "owner") ?? null;
+}
+
+export type CatalogBusinessCandidate = {
+  id: string;
+  name: string;
+  relation: "partner" | "owner";
+};
+
+/** BMs efetivamente acessíveis pelo token do perfil e associados à conta.
+ * A BM proprietária da conta pode ser OUTRA empresa, sem permissão para
+ * criar catálogo. Por isso, preferimos BMs parceiras/cliente que o perfil gerencia.
+ * Nunca usamos BMs arbitrárias retornadas em me/businesses.
+ */
+export async function catalogBusinessesForAccount(auth: MetaAuth, act: string): Promise<CatalogBusinessCandidate[]> {
+  const [info, mine, agencies] = await Promise.all([
+    accountInfo(auth, act),
+    listBusinesses(auth),
+    graphAll<{ id: string; name: string }>(`${act}/agencies`, { fields: "id,name" }, auth, 3).catch(() => []),
   ]);
-  // Prefere um BM que o perfil também acessa; senão, o BM que a Meta diz ter a conta
-  const viaAgency = agencies.find((a) => mine.some((m) => m.id === a.id)) ?? agencies[0];
-  if (viaAgency) return viaAgency;
-  for (const b of mine.slice(0, 20)) {
-    const accs = await graphAll<{ id: string }>(`${b.id}/client_ad_accounts`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]);
-    if (accs.some((a) => a.id === act)) return b;
+  const ownerId = info.business?.id ?? null;
+  const agencyIds = new Set(agencies.map((a) => a.id));
+  const partnerIds = new Set<string>();
+
+  // Uma BM que recebeu a conta como cliente pode estar em client_ad_accounts
+  // mesmo se a API não expuser a agência via /act/agencies.
+  for (let i = 0; i < mine.length; i += 6) {
+    await Promise.all(mine.slice(i, i + 6).map(async (b) => {
+      if (agencyIds.has(b.id)) {
+        partnerIds.add(b.id);
+        return;
+      }
+      const client = await graphAll<{ id: string }>(
+        `${b.id}/client_ad_accounts`, { fields: "id", limit: 100 }, auth, 5,
+      ).catch(() => [] as { id: string }[]);
+      if (client.some((a) => a.id === act || a.id === act.replace(/^act_/, ""))) {
+        partnerIds.add(b.id);
+      }
+    }));
   }
-  return null;
+  const partners = mine.filter((b) => partnerIds.has(b.id) && b.id !== ownerId)
+    .map((b) => ({ ...b, relation: "partner" as const }));
+  const owner = mine.filter((b) => b.id === ownerId)
+    .map((b) => ({ ...b, relation: "owner" as const }));
+  return [...partners, ...owner];
+}
+
+/** Catálogo automático: escolher uma BM permitida, priorizando parceiro.
+ * Quando há várias parceiras, requer escolha explícita para não criar bens
+ * na empresa errada. A BM dona só é padrão se nenhuma parceira está acessível.
+ */
+export async function resolveCatalogBusiness(
+  auth: MetaAuth, act: string, selectedId = "",
+): Promise<CatalogBusinessCandidate> {
+  const candidates = await catalogBusinessesForAccount(auth, act);
+  if (selectedId) {
+    const selected = candidates.find((b) => b.id === selectedId);
+    if (!selected) throw new MetaError(
+      `A BM selecionada (${selectedId}) não tem acesso de parceiro/proprietário à conta ${act} neste perfil. Escolha outra BM em Campanha → Catálogo.`
+    );
+    return selected;
+  }
+  const partners = candidates.filter((b) => b.relation === "partner");
+  if (partners.length === 1) return partners[0];
+  if (partners.length > 1) throw new MetaError(
+    "Há mais de uma BM parceira com acesso à conta: escolha a BM correta em Campanha → Catálogo antes de publicar."
+  );
+  if (candidates.length === 1) return candidates[0];
+  throw new MetaError(
+    "Não encontrei uma BM autorizada a criar catálogo para esta conta. Confira o perfil, o compartilhamento da conta e a permissão catalog_management."
+  );
 }
 
 /** Catálogos que a conta de anúncio pode usar (os do BM em que ela está). */
 export async function listAccountCatalogs(auth: MetaAuth, act: string): Promise<Catalog[]> {
-  const bm = await accountBusiness(auth, act);
-  return bm ? listBusinessCatalogs(auth, bm.id) : [];
+  const choices = await catalogBusinessesForAccount(auth, act);
+  const all = await Promise.all(choices.map((bm) => listBusinessCatalogs(auth, bm.id)));
+  const seen = new Set<string>();
+  return all.flat().filter((cat) => !seen.has(cat.id) && seen.add(cat.id));
 }
 
 export async function createCatalog(auth: MetaAuth, businessId: string, name: string) {

@@ -5,7 +5,7 @@ import { MetaError, graph, listPages, type MetaAuth } from "../meta";
 import { authForAccount, listAccounts, profileAuth } from "../profiles";
 import { CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, NEEDS_PIXEL, needsBidAmount, type DraftData } from "./types";
 import {
-  accountBusiness, adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch,
+  adsVolume, batchStatus, createCatalog, createIn, createProductSet, findRecentByName, getEffectiveStatus, itemsBatch, resolveCatalogBusiness,
   instagramIdentity, linkPixelToCatalog, listBusinessCatalogs, listProductSets, listProductsByRetailer, pageDetails, promotePages,
 } from "./meta-ads";
 import { ensureOnAccount, getMedia, type MediaAsset } from "./media";
@@ -682,17 +682,26 @@ export const AUTO_CATALOG_NAME = "Painel de Vendas · Catálogo automático";
 registerExecutor("catalog_auto", async (ctx) => {
   const d = draftOf(ctx);
   const auth = await authForAccount(d.accountId);
-  const bm = await accountBusiness(auth, d.accountId);
-  if (!bm?.id) throw new MetaError("A conta de anúncio não está em nenhum Business Manager que o perfil conectado enxergue; o catálogo automático precisa de um BM.");
+  // Não usar accountInfo.business: ele identifica a BM PROPRIETÁRIA da conta,
+  // que muitas vezes não é a BM parceira conectada e não concede direito de criar catálogo.
+  const bm = await resolveCatalogBusiness(auth, d.accountId, d.catalog.businessId ?? "");
 
   const saved = await getSetting<Record<string, string>>("auto_catalogs", {});
   const list = await listBusinessCatalogs(auth, bm.id);
   let cat = list.find((c) => c.id === saved[bm.id]) ?? list.find((c) => c.name === AUTO_CATALOG_NAME);
   let created = false;
   if (!cat) {
-    const r = await createCatalog(auth, bm.id, AUTO_CATALOG_NAME);
-    cat = { id: r.id, name: AUTO_CATALOG_NAME };
-    created = true;
+    try {
+      const r = await createCatalog(auth, bm.id, AUTO_CATALOG_NAME);
+      cat = { id: r.id, name: AUTO_CATALOG_NAME };
+      created = true;
+    } catch (e: any) {
+      throw new MetaError(
+        `Não foi possível criar o catálogo na BM ${bm.name} (${bm.id}, ${bm.relation === "partner" ? "parceira" : "proprietária"}): ${e?.message ?? "sem permissão"}. ` +
+        "Confirme acesso administrativo e permissão catalog_management para o perfil conectado.",
+        e?.code, e?.subcode,
+      );
+    }
   }
   if (saved[bm.id] !== cat.id) await setSetting("auto_catalogs", { ...saved, [bm.id]: cat.id });
 
@@ -709,7 +718,7 @@ registerExecutor("catalog_auto", async (ctx) => {
     status: "done",
     metaId: cat.id,
     result: { id: cat.id, name: cat.name, business_id: bm.id, created },
-    message: `${created ? "Catálogo criado" : "Catálogo reaproveitado"}: ${cat.name} (BM ${bm.name})${pixelNote}`,
+    message: `${created ? "Catálogo criado" : "Catálogo reaproveitado"}: ${cat.name} (BM ${bm.name}, ${bm.relation === "partner" ? "parceira" : "proprietária"})${pixelNote}`,
   };
 });
 

@@ -67,6 +67,8 @@ export default function Wizard({
   const [save, setSave] = useState<{ state: "saved" | "dirty" | "saving" | "error"; at?: string; error?: string }>({ state: "saved" });
   const [look, setLook] = useState<Lookups>(EMPTY);
   const [lookErr, setLookErr] = useState<string | null>(null);
+  const [catalogBusinesses, setCatalogBusinesses] = useState<{ id: string; name: string; relation: "partner" | "owner" }[]>([]);
+  const [catalogBusinessError, setCatalogBusinessError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sets, setSets] = useState<{ id: string; name: string; product_count?: number }[] | null>([]);
   const [media, setMedia] = useState(initialMedia);
@@ -186,6 +188,18 @@ export default function Wizard({
     return () => { alive = false; };
   }, [d.accountId]);
 
+  // BMs que o perfil realmente gerencia e que têm esta conta como cliente/parceira.
+  useEffect(() => {
+    if (!d.accountId) { setCatalogBusinesses([]); return; }
+    let active = true;
+    setCatalogBusinesses([]);
+    setCatalogBusinessError(null);
+    api<{ id: string; name: string; relation: "partner" | "owner" }[]>("catalog_businesses", d.accountId)
+      .then((b) => { if (active) setCatalogBusinesses(b); })
+      .catch((e) => { if (active) setCatalogBusinessError(String(e?.message ?? e)); });
+    return () => { active = false; };
+  }, [d.accountId]);
+
   useEffect(() => {
     if (!d.accountId || !d.campaign.catalogId) { setSets([]); return; }
     setSets(null);
@@ -303,7 +317,7 @@ export default function Wizard({
               <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
                     adsetGroups: x.adsetGroups?.map((g) => ({
                       ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
-                    })) ?? [], campaign: { ...x.campaign, catalogId: "" } }))}>
+                    })) ?? [], catalog: { ...x.catalog, businessId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
                 <option value="">Escolha…</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}{a.account_status && a.account_status !== 1 ? " — não ativa" : ""}</option>
@@ -335,9 +349,28 @@ export default function Wizard({
           {catalog && (
             <div className="grid gap-2">
               {autoCat ? (
-                <p className="notice notice-ok text-sm">
-                  <b>Catálogo automático.</b> Você só escolhe os criativos na etapa Criativos. Na publicação, o painel usa o catálogo do Business Manager da conta (ou cria um), cria os produtos com as imagens e o conjunto de produtos da campanha.
-                </p>
+                <div className="grid gap-3">
+                  <p className="notice notice-ok text-sm">
+                    <b>Catálogo automático.</b> O painel usa uma BM parceira do perfil conectado, e não automaticamente a BM proprietária da conta.
+                    Na publicação, reutiliza ou cria o catálogo e seus produtos na BM selecionada.
+                  </p>
+                  <label className="field">
+                    <span className="label">BM para criar ou reutilizar o catálogo</span>
+                    <select className="select" value={d.catalog.businessId || ""} onChange={(e) => setK({ businessId: e.target.value })}>
+                      <option value="">Automático — única BM parceira com acesso</option>
+                      {catalogBusinesses.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} · {b.id} ({b.relation === "partner" ? "parceira" : "proprietária"})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-muted">
+                      Se mais de uma BM parceira aparecer, selecione a correta. É necessário ser administrador da BM para criar o catálogo.
+                    </span>
+                  </label>
+                  {catalogBusinessError && <p className="notice notice-warn text-sm">Não foi possível conferir as BMs: {catalogBusinessError}</p>}
+                  {catalogBusinesses.length === 0 && !catalogBusinessError && d.accountId && <p className="text-xs text-muted">Verificando BMs disponíveis…</p>}
+                </div>
               ) : (
               <div className="field">
               <span className="label">Catálogo vinculado</span>
@@ -778,7 +811,9 @@ export default function Wizard({
             ["Orçamento", d.campaign.budgetLevel === "campaign" ? `Na campanha · ${d.campaign.budgetType === "daily" ? "diário" : "total"} ${money(d.campaign.budget, cur)}` : `No conjunto · ${d.campaign.budgetType === "daily" ? "diário" : "total"}`],
             ["Lance", label(BID_STRATEGIES, d.campaign.bidStrategy)],
             ["Status inicial", d.campaign.status === "ACTIVE" ? "Ativa" : "Pausada"],
-            ...(catalog ? [["Catálogo", autoCat ? "Automático (catálogo do BM da conta)" : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name ?? d.campaign.catalogId] as [string, string]] : []),
+            ...(catalog ? [["Catálogo", autoCat
+              ? `Automático · ${catalogBusinesses.find((b) => b.id === d.catalog.businessId)?.name || (d.catalog.businessId ? d.catalog.businessId : "BM parceira acessível")}`
+              : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name ?? d.campaign.catalogId] as [string, string]] : []),
           ]} />
           {d.extraAccountIds.length > 0 && (
             <section className="panel panel-pad">
