@@ -176,99 +176,93 @@ async function autoProducts(d: DraftData, draftId: string): Promise<{ products: 
 
 async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
   const jobs: JobSpec[] = [];
+  const groups = adsetGroupsFor(d);
   const autoCatalog = d.creative.mode === "catalog" && d.catalog.source === "auto";
+  const assets = await getMediaMany(d.creative.mediaIds);
   let videoSchedule: JobSpec | null = null;
+  let products: AutoProduct[] = [];
+
   if (autoCatalog) {
-    const { products } = await autoProducts(d, draftId);
+    ({ products } = await autoProducts(d, draftId));
     if (d.catalog.delayMinutes > 0) {
-      const media = await getMediaMany(d.creative.mediaIds);
-      const videos = media.filter((m) => m.kind === "video").map((m) => ({
+      const videos = assets.filter((m) => m.kind === "video").map((m) => ({
         videoId: m.id,
         videoName: m.name,
         coverId: d.catalog.images?.[m.id] || d.catalog.productImageId,
         retailerIds: products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId),
       }));
-      if (videos.length) {
-        videoSchedule = {
-          key: "video_schedule",
-          kind: "catalog_video_schedule",
-          label: `Programar inclusão de vídeos em ${d.catalog.delayMinutes} minuto(s)`,
-          input: { delayMinutes: d.catalog.delayMinutes, videos },
-        };
-      }
+      if (videos.length) videoSchedule = {
+        key: "video_schedule",
+        kind: "catalog_video_schedule",
+        label: `Programar inclusão de vídeos em ${d.catalog.delayMinutes} minuto(s)`,
+        input: { delayMinutes: d.catalog.delayMinutes, videos },
+      };
     }
     jobs.push(
       { key: "catalog", kind: "catalog_auto", label: "Catálogo do Business Manager (identifica ou cria)" },
       { key: "products", kind: "catalog_products", label: `Criação de ${products.length} produto(s) em lote`, input: { products } },
       { key: "check", kind: "catalog_check", label: "Processamento dos produtos pela Meta", input: { publish: true } },
-      { key: "product_set", kind: "product_set", label: "Conjunto de produtos da campanha", input: { retailerIds: products.map((p) => p.retailerId) } },
+      { key: "product_set", kind: "product_set", label: "Produtos da campanha", input: { retailerIds: products.map((p) => p.retailerId) } },
     );
-    // Um anúncio por criativo: cada anúncio mostra só os produtos do seu criativo
-    if (d.catalog.adsMode === "per_creative") {
-      const media = await getMediaMany(d.creative.mediaIds);
-      media.forEach((m, i) => {
-        const ids = products.filter((p) => p.mediaId === m.id).map((p) => p.retailerId);
-        if (ids.length) jobs.push({ key: `product_set:${i + 1}`, kind: "product_set", label: `Conjunto de produtos · ${m.name}`, input: { retailerIds: ids, suffix: `${i + 1} · ${m.id.slice(0, 8)} · ${m.name}` } });
+    if (groups.length > 1) for (const group of groups) {
+      const ids = products.filter((p) => group.mediaIds.includes(p.mediaId)).map((p) => p.retailerId);
+      jobs.push({
+        key: `product_set:group:${group.id}`,
+        kind: "product_set",
+        label: `Produtos · ${group.settings.name}`,
+        input: { retailerIds: ids, suffix: `grupo-${group.id}` },
       });
     }
   }
+
+  if (d.creative.mode === "media") {
+    for (const m of assets) jobs.push({
+      key: `media:${m.id}`, kind: "media", label: `Upload de mídia · ${m.name}`, input: { assetId: m.id },
+    });
+  }
   jobs.push({ key: "campaign", kind: "campaign", label: `Criação da campanha · ${d.campaign.name}` });
-  if (autoCatalog && d.catalog.adsMode === "per_creative") {
-    // Cada criativo recebe um conjunto de anúncios promovendo SOMENTE seus produtos.
-    // A Meta pode exigir que o product_set_id do anúncio seja igual ao do conjunto.
-    // O fallback antigo para o conjunto geral misturava vídeos de anúncios distintos.
-    const media = await getMediaMany(d.creative.mediaIds);
-    media.forEach((m, i) => {
-      const n = i + 1;
-      const adName = adNameFor(d.creative.adName, n, m.name, media.length);
-      const productSetKey = `product_set:${n}`;
-      const adsetKey = `adset:${n}`;
+
+  let serial = 0;
+  for (const group of groups) {
+    const adsetKey = groups.length === 1 ? "adset" : `adset:group:${group.id}`;
+    const productSetKey = autoCatalog ? (groups.length === 1 ? "product_set" : `product_set:group:${group.id}`) : undefined;
+    jobs.push({
+      key: adsetKey,
+      kind: "adset",
+      label: `Criação do conjunto · ${group.settings.name}`,
+      input: { settings: group.settings, productSetKey, adsetName: group.settings.name, adsetCount: 1, adsetIndex: 1 },
+    });
+
+    const mediaForGroup = group.mediaIds.map((id) => assets.find((m) => m.id === id)).filter((m): m is (typeof assets)[number] => Boolean(m));
+    const multipleAds = d.creative.mode === "media" || (autoCatalog && d.catalog.adsMode === "per_creative");
+    const entries = multipleAds ? mediaForGroup : [null];
+    for (const m of entries) {
+      serial++;
+      const suffix = groups.length === 1 ? String(serial) : `${group.id}:${serial}`;
+      const adName = adNameFor(d.creative.adName, serial, m?.name ?? (d.creative.mode === "catalog" ? "Catálogo" : null), groups.reduce((n, g) => n + (multipleAds ? g.mediaIds.length : 1), 0));
+      const creativeKey = `creative:${suffix}`;
       jobs.push({
-        key: adsetKey,
-        kind: "adset",
-        label: `Conjunto do anúncio · ${adName}`,
+        key: creativeKey, kind: "creative", label: `Criativo · ${adName}`,
         input: {
+          adName,
+          mediaKey: d.creative.mode === "media" && m ? `media:${m.id}` : undefined,
           productSetKey,
-          adsetName: `${d.adset.name.trim()} · ${n} · ${m.name}`.slice(0, 250),
-          adsetCount: media.length,
-          adsetIndex: n,
+          settings: group.settings,
         },
       });
-      jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo de catálogo · ${adName}`, input: { adName, productSetKey, mediaId: m.id } });
-      jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}`, adsetKey, productSetKey, mediaId: m.id } });
-    });
-  } else {
-    jobs.push({ key: "adset", kind: "adset", label: `Criação do conjunto · ${d.adset.name}` });
+      jobs.push({
+        key: `ad:${suffix}`, kind: "ad", label: `Criação do anúncio · ${adName}`,
+        input: { adName, creativeKey, adsetKey, productSetKey, mediaId: m?.id ?? undefined },
+      });
+    }
   }
-  if (autoCatalog && d.catalog.adsMode === "per_creative") {
-    // A criação de cada anúncio já foi adicionada acima, com conjunto isolado.
-  } else if (d.creative.mode === "catalog") {
-    const adName = adNameFor(d.creative.adName.replace("{midia}", "Catálogo"), 1, null, 1);
-    jobs.push({ key: "creative:1", kind: "creative", label: `Criativo de catálogo`, input: { adName } });
-    jobs.push({ key: "ad:1", kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: "creative:1" } });
-  } else {
-    const media = await getMediaMany(d.creative.mediaIds);
-    for (const m of media) jobs.push({ key: `media:${m.id}`, kind: "media", label: `Upload de mídia · ${m.name}`, input: { assetId: m.id } });
-    media.forEach((m, i) => {
-      const n = i + 1;
-      const adName = adNameFor(d.creative.adName, n, m.name, media.length);
-      jobs.push({ key: `creative:${n}`, kind: "creative", label: `Criativo · ${adName}`, input: { adName, mediaKey: `media:${m.id}` } });
-      jobs.push({ key: `ad:${n}`, kind: "ad", label: `Criação do anúncio · ${adName}`, input: { adName, creativeKey: `creative:${n}` } });
-    });
-  }
-  // Quando há vídeo agendado, confirma primeiro que os anúncios já foram
-  // criados na Meta. O delay não espera pela aprovação/revisão publicitária.
+
   if (videoSchedule) {
-    jobs.push({
-      key: "publish_confirm",
-      kind: "publish_confirm",
-      label: "Publicação na Meta (anúncios criados)",
-    });
+    jobs.push({ key: "publish_confirm", kind: "publish_confirm", label: "Publicação na Meta (anúncios criados)" });
     jobs.push(videoSchedule);
   }
   jobs.push({
-    key: "review",
-    kind: "review",
+    key: "review", kind: "review",
     label: videoSchedule ? "Acompanhamento da revisão da Meta" : "Publicação na Meta (revisão dos anúncios)",
   });
   return jobs;
