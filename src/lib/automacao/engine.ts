@@ -3,7 +3,7 @@ import { db, logEvent } from "../db";
 import { authForAccount, authOf, getProfile, listAllPages } from "../profiles";
 import { accountBusiness, businessPixelIds, getProduct, listAccountCatalogs, listAccountPixels, listCustomAudiences, pixelOwner, sharePixel } from "./meta-ads";
 import { getMedia, getMediaMany } from "./media";
-import { normalizeDraft, validateDraft, type DraftData, type PageLite } from "./types";
+import { adsetGroupsFor, normalizeDraft, validateDraft, type DraftData, type PageLite } from "./types";
 import { createRun, kick, retryRun as queueRetry, tick, type JobSpec } from "./queue";
 import "./executors"; // registra o que cada operação faz
 
