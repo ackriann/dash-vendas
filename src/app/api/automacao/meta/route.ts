@@ -1,6 +1,6 @@
 import { authForAccount } from "@/lib/profiles";
 import {
-  listAccountCatalogs, listAccountPixels, listCustomAudiences, listInstagramAccounts, listProductSets, searchInterests, searchRegions,
+  catalogBusinessesForAccount, listAccountCatalogs, listAccountPixels, listCustomAudiences, listInstagramAccounts, listProductSets, searchInterests, searchRegions,
 } from "@/lib/automacao/meta-ads";
 
 export const runtime = "nodejs";
@@ -20,6 +20,8 @@ export async function GET(req: Request) {
         return Response.json({ data: await listAccountPixels(auth, account) });
       case "catalogs":
         return Response.json({ data: await listAccountCatalogs(auth, account) });
+      case "catalog_businesses":
+        return Response.json({ data: await catalogBusinessesForAccount(auth, account) });
       case "productsets": {
         const catalog = sp.get("catalog") ?? "";
         if (!/^\d+$/.test(catalog)) return Response.json({ data: [] });
