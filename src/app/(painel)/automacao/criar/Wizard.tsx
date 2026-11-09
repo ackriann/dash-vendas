@@ -5,7 +5,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import MediaUploader from "@/components/automacao/MediaUploader";
 import {
   BID_STRATEGIES, CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
-  RECOMMENDED_URL_TAGS, STEP_LABELS, needsBidAmount, validateDraft,
+  RECOMMENDED_URL_TAGS, STEP_LABELS, adsetGroupsFor, adsPerGroup, draftStructure, needsBidAmount, validateDraft,
   type AccountLite, type CatalogAuto, type CatalogPrefs, type DraftData, type MediaLite, type Named, type PageLite, type Region,
 } from "@/lib/automacao/types";
 import { createCatalogForAccountAction, publishDraftAction, saveDraftAction, saveProductImageAction } from "../actions";
@@ -63,6 +63,7 @@ export default function Wizard({
   const router = useRouter();
   const [d, setD] = useState<DraftData>(initial);
   const [step, setStep] = useState(Math.min(4, Math.max(1, initialStep || 1)));
+  const [selectedGroupId, setSelectedGroupId] = useState(initial.adsetGroups?.[0]?.id ?? "1");
   const [save, setSave] = useState<{ state: "saved" | "dirty" | "saving" | "error"; at?: string; error?: string }>({ state: "saved" });
   const [look, setLook] = useState<Lookups>(EMPTY);
   const [lookErr, setLookErr] = useState<string | null>(null);
@@ -81,8 +82,36 @@ export default function Wizard({
   const catalog = d.creative.mode === "catalog";
   const autoCat = catalog && d.catalog.source === "auto";
 
+  const groups = adsetGroupsFor(d);
+  const activeGroup = groups.find((g) => g.id === selectedGroupId) ?? groups[0];
+  const activeAdset = activeGroup.settings;
+  const structure = draftStructure(d);
   const setC = (p: Partial<DraftData["campaign"]>) => setD((x) => ({ ...x, campaign: { ...x.campaign, ...p } }));
-  const setA = (p: Partial<DraftData["adset"]>) => setD((x) => ({ ...x, adset: { ...x.adset, ...p } }));
+  const setA = (p: Partial<DraftData["adset"]>) => setD((x) => {
+    const list = adsetGroupsFor(x).map((g) => g.id === activeGroup.id ? { ...g, settings: { ...g.settings, ...p } } : g);
+    return { ...x, adset: list[0].settings, adsetGroups: x.adsetGroups?.length ? list : [] };
+  });
+  const addAdset = () => {
+    if (groups.length >= 30) return;
+    const n = Math.max(...groups.map((g) => Number(g.id) || 0)) + 1;
+    const id = String(n);
+    setD((x) => ({ ...x, adsetGroups: [
+      ...adsetGroupsFor(x),
+      { id, settings: { ...activeAdset, name: `${activeAdset.name} · ${n}` }, mediaIds: [...activeGroup.mediaIds] },
+    ] }));
+    setSelectedGroupId(id);
+  };
+  const removeAdset = () => {
+    if (groups.length === 1) return;
+    const remaining = groups.filter((g) => g.id !== activeGroup.id);
+    setD((x) => ({ ...x, adset: remaining[0].settings, adsetGroups: remaining }));
+    setSelectedGroupId(remaining[0].id);
+  };
+  const assignMediaToGroup = (groupId: string, ids: string[]) => setD((x) => {
+    const list = adsetGroupsFor(x).map((g) => g.id === groupId ? { ...g, mediaIds: ids } : g);
+    return { ...x, adsetGroups: list };
+  });
+  const setGroupMedia = (ids: string[]) => assignMediaToGroup(activeGroup.id, ids);
   const setCr = (p: Partial<DraftData["creative"]>) => setD((x) => ({ ...x, creative: { ...x.creative, ...p } }));
   const setK = (p: Partial<CatalogAuto>) => setD((x) => ({ ...x, catalog: { ...x.catalog, ...p } }));
 
@@ -164,7 +193,7 @@ export default function Wizard({
   }, [d.accountId, d.campaign.catalogId]);
 
   // Conferência das contas extras (BM, pixel, catálogo, públicos, moeda)
-  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.catalog.source, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id)]);
+  const checkKey = JSON.stringify([d.accountId, d.extraAccountIds, d.adset.pixelId, d.creative.mode, d.catalog.source, d.campaign.catalogId, d.adset.audiences.map((a) => a.id), d.adset.excludedAudiences.map((a) => a.id), d.adsetGroups]);
   useEffect(() => {
     if (!d.accountId || !d.extraAccountIds.length) { setChecks({ loading: false, list: [] }); return; }
     let alive = true;
@@ -181,14 +210,32 @@ export default function Wizard({
 
   // Pixel padrão: o único da conta
   useEffect(() => {
-    if (!d.adset.pixelId && look.pixels.length === 1) setA({ pixelId: look.pixels[0].id });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (look.pixels.length !== 1) return;
+    const pixelId = look.pixels[0].id;
+    setD((x) => {
+      const groups = adsetGroupsFor(x);
+      if (groups.every((g) => g.settings.pixelId)) return x;
+      const updated = groups.map((g) => ({
+        ...g, settings: g.settings.pixelId ? g.settings : { ...g.settings, pixelId },
+      }));
+      return { ...x, adset: updated[0].settings, adsetGroups: x.adsetGroups?.length ? updated : [] };
+    });
   }, [look.pixels]);
 
   function changeObjective(o: DraftData["campaign"]["objective"]) {
     const goals = GOALS[o];
-    setC({ objective: o });
-    if (!goals.some(([g]) => g === d.adset.optimizationGoal)) setA({ optimizationGoal: goals[0][0] });
+    setD((x) => {
+      const groups = adsetGroupsFor(x).map((g) => ({
+        ...g,
+        settings: goals.some(([goal]) => goal === g.settings.optimizationGoal)
+          ? g.settings : { ...g.settings, optimizationGoal: goals[0][0] },
+      }));
+      return {
+        ...x, campaign: { ...x.campaign, objective: o },
+        adset: groups[0].settings,
+        adsetGroups: x.adsetGroups?.length ? groups : [],
+      };
+    });
   }
 
   function setMode(mode: "media" | "catalog") {
@@ -253,7 +300,10 @@ export default function Wizard({
           <div className="grid md:grid-cols-2 gap-3">
             <label className="field">
               <span className="label">Conta de anúncio {d.extraAccountIds.length ? "principal" : "conectada"}</span>
-              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
+              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+                    adsetGroups: x.adsetGroups?.map((g) => ({
+                      ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+                    })) ?? [], campaign: { ...x.campaign, catalogId: "" } }))}>
                 <option value="">Escolha…</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}{a.account_status && a.account_status !== 1 ? " — não ativa" : ""}</option>
@@ -389,29 +439,73 @@ export default function Wizard({
 
       {step === 2 && (
         <section className="panel panel-pad grid gap-4">
-          <h2>Conjunto de anúncios</h2>
+          <h2>Conjuntos de anúncios</h2>
+          <div className="rounded-xl border border-line p-3 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-semibold">Estrutura: 1 campanha · {structure.adsets} conjunto(s) · {structure.ads} anúncio(s)</p>
+                <p className="text-xs text-muted">Cada conjunto possui orçamento, público, posicionamentos e criativos próprios. Nada é multiplicado sem sua configuração.</p>
+              </div>
+              <button type="button" className="btn btn-sm btn-primary" disabled={groups.length >= 30} onClick={addAdset}>+ Adicionar conjunto</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {groups.map((g, i) => (
+                <button key={g.id} type="button" className={`btn btn-sm ${activeGroup.id === g.id ? "btn-primary" : ""}`}
+                  onClick={() => setSelectedGroupId(g.id)}>
+                  {i + 1}. {g.settings.name || "Sem nome"} · {adsPerGroup(d, g)} anúncio(s)
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold">Editando: {activeGroup.settings.name || "novo conjunto"}</span>
+              {groups.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={removeAdset}>Remover este conjunto</button>}
+            </div>
+            {(!catalog || autoCat) && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Criativos deste conjunto ({activeGroup.mediaIds.length})</p>
+                <p className="text-xs text-muted">Selecione os arquivos na etapa Criativos. Depois marque quais serão publicados neste conjunto. O mesmo arquivo pode ser usado em vários conjuntos.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-sm" onClick={() => setGroupMedia([...d.creative.mediaIds])}>Selecionar todos</button>
+                  <button type="button" className="btn btn-sm" onClick={() => setGroupMedia([])}>Limpar seleção</button>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {chosenMedia.map((m) => (
+                    <label key={m.id} className="flex gap-2 items-center border border-line rounded-lg p-2 text-sm">
+                      <input type="checkbox" checked={activeGroup.mediaIds.includes(m.id)}
+                        onChange={(e) => setGroupMedia(e.target.checked ? [...activeGroup.mediaIds, m.id] : activeGroup.mediaIds.filter((id) => id !== m.id))} />
+                      <span className="truncate">{m.name}</span>
+                    </label>
+                  ))}
+                </div>
+                {!chosenMedia.length && <p className="text-xs text-muted">Ainda não há mídias selecionadas. Vá à etapa Criativos e depois retorne aqui.</p>}
+              </div>
+            )}
+            {autoCat && d.catalog.adsMode === "per_creative" && activeGroup.mediaIds.length > 1 && (
+              <p className="notice notice-warn text-sm">Catálogo dinâmico: a Meta pode selecionar qualquer vídeo dos produtos deste conjunto. Para um vídeo fixo diferente por anúncio, escolha o modo de criativos de mídia.</p>
+            )}
+          </div>
           <div className="grid md:grid-cols-2 gap-3">
-            <label className="field"><span className="label">Nome do conjunto</span><input className="input" value={d.adset.name} maxLength={200} onChange={(e) => setA({ name: e.target.value })} placeholder="Ex.: BR · 25-55 · Advantage+" /></label>
+            <label className="field"><span className="label">Nome do conjunto</span><input className="input" value={activeAdset.name} maxLength={200} onChange={(e) => setA({ name: e.target.value })} placeholder="Ex.: BR · 25-55 · Advantage+" /></label>
             <label className="field">
               <span className="label">Meta de otimização</span>
-              <select className="select" value={d.adset.optimizationGoal} onChange={(e) => setA({ optimizationGoal: e.target.value })}>
+              <select className="select" value={activeAdset.optimizationGoal} onChange={(e) => setA({ optimizationGoal: e.target.value })}>
                 {GOALS[d.campaign.objective].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </label>
           </div>
 
-          {(NEEDS_PIXEL.has(d.adset.optimizationGoal) || catalog) && (
+          {(NEEDS_PIXEL.has(activeAdset.optimizationGoal) || catalog) && (
             <div className="grid md:grid-cols-2 gap-3">
               <label className="field">
                 <span className="label">Pixel</span>
-                <select className="select" value={d.adset.pixelId} onChange={(e) => setA({ pixelId: e.target.value })}>
+                <select className="select" value={activeAdset.pixelId} onChange={(e) => setA({ pixelId: e.target.value })}>
                   <option value="">{loading ? "Carregando…" : look.pixels.length ? "Escolha…" : "Nenhum pixel na conta"}</option>
                   {look.pixels.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.id}{p.last_fired_time ? "" : " (sem eventos)"}</option>)}
                 </select>
               </label>
               <label className="field">
                 <span className="label">Evento de conversão</span>
-                <select className="select" value={d.adset.event} onChange={(e) => setA({ event: e.target.value })}>
+                <select className="select" value={activeAdset.event} onChange={(e) => setA({ event: e.target.value })}>
                   {EVENTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </select>
               </label>
@@ -422,7 +516,7 @@ export default function Wizard({
           {catalog && !autoCat && (
             <label className="field">
               <span className="label">Conjunto de produtos</span>
-              <select className="select" value={d.adset.productSetId} onChange={(e) => setA({ productSetId: e.target.value })}>
+              <select className="select" value={activeAdset.productSetId} onChange={(e) => setA({ productSetId: e.target.value })}>
                 <option value="">{!d.campaign.catalogId ? "Escolha o catálogo na etapa 1" : sets === null ? "Carregando…" : sets.length ? "Escolha…" : "Nenhum conjunto de produtos — adicione produtos ao catálogo"}</option>
                 {(sets ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} · {s.product_count ?? 0} produto(s)</option>)}
               </select>
@@ -431,19 +525,19 @@ export default function Wizard({
 
           <div className="grid md:grid-cols-3 gap-3">
             {d.campaign.budgetLevel === "adset" && (
-              <label className="field"><span className="label">Orçamento {d.campaign.budgetType === "daily" ? "diário" : "total"} ({cur})</span><MoneyInput value={d.adset.budget} onChange={(v) => setA({ budget: v })} /></label>
+              <label className="field"><span className="label">Orçamento {d.campaign.budgetType === "daily" ? "diário" : "total"} ({cur})</span><MoneyInput value={activeAdset.budget} onChange={(v) => setA({ budget: v })} /></label>
             )}
             {needsBidAmount(d.campaign.bidStrategy) && (
-              <label className="field"><span className="label">{d.campaign.bidStrategy === "COST_CAP" ? "Custo por resultado alvo" : "Limite de lance"} ({cur})</span><MoneyInput value={d.adset.bidAmount} onChange={(v) => setA({ bidAmount: v })} /></label>
+              <label className="field"><span className="label">{d.campaign.bidStrategy === "COST_CAP" ? "Custo por resultado alvo" : "Limite de lance"} ({cur})</span><MoneyInput value={activeAdset.bidAmount} onChange={(v) => setA({ bidAmount: v })} /></label>
             )}
             {d.campaign.bidStrategy === "LOWEST_COST_WITH_MIN_ROAS" && (
-              <label className="field"><span className="label">ROAS mínimo (ex.: 2,5)</span><MoneyInput value={d.adset.roasFloor} onChange={(v) => setA({ roasFloor: v })} /></label>
+              <label className="field"><span className="label">ROAS mínimo (ex.: 2,5)</span><MoneyInput value={activeAdset.roasFloor} onChange={(v) => setA({ roasFloor: v })} /></label>
             )}
           </div>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <label className="field"><span className="label">Início (fuso da conta) — vazio = agora</span><input className="input" type="datetime-local" value={d.adset.startTime} onChange={(e) => setA({ startTime: e.target.value })} /></label>
-            <label className="field"><span className="label">Término {d.campaign.budgetType === "lifetime" ? "" : "(opcional)"}</span><input className="input" type="datetime-local" value={d.adset.endTime} onChange={(e) => setA({ endTime: e.target.value })} /></label>
+            <label className="field"><span className="label">Início (fuso da conta) — vazio = agora</span><input className="input" type="datetime-local" value={activeAdset.startTime} onChange={(e) => setA({ startTime: e.target.value })} /></label>
+            <label className="field"><span className="label">Término {d.campaign.budgetType === "lifetime" ? "" : "(opcional)"}</span><input className="input" type="datetime-local" value={activeAdset.endTime} onChange={(e) => setA({ endTime: e.target.value })} /></label>
           </div>
 
           <fieldset className="grid gap-3 border-t border-line pt-4">
@@ -452,12 +546,12 @@ export default function Wizard({
               <span className="label">Países</span>
               <div className="flex flex-wrap gap-1.5">
                 {COUNTRIES.map(([k, l]) => (
-                  <button key={k} type="button" className={`pill cursor-pointer ${d.adset.countries.includes(k) ? "pill-info" : ""}`} onClick={() => setA({ countries: d.adset.countries.includes(k) ? d.adset.countries.filter((x) => x !== k) : [...d.adset.countries, k] })}>{l}</button>
+                  <button key={k} type="button" className={`pill cursor-pointer ${activeAdset.countries.includes(k) ? "pill-info" : ""}`} onClick={() => setA({ countries: activeAdset.countries.includes(k) ? activeAdset.countries.filter((x) => x !== k) : [...activeAdset.countries, k] })}>{l}</button>
                 ))}
-                {d.adset.countries.filter((c) => !COUNTRIES.some(([k]) => k === c)).map((c) => (
-                  <span key={c} className="chip">{c}<button type="button" onClick={() => setA({ countries: d.adset.countries.filter((x) => x !== c) })} aria-label={`Remover ${c}`}>×</button></span>
+                {activeAdset.countries.filter((c) => !COUNTRIES.some(([k]) => k === c)).map((c) => (
+                  <span key={c} className="chip">{c}<button type="button" onClick={() => setA({ countries: activeAdset.countries.filter((x) => x !== c) })} aria-label={`Remover ${c}`}>×</button></span>
                 ))}
-                <OtherCountry onAdd={(c) => !d.adset.countries.includes(c) && setA({ countries: [...d.adset.countries, c] })} />
+                <OtherCountry onAdd={(c) => !activeAdset.countries.includes(c) && setA({ countries: [...activeAdset.countries, c] })} />
               </div>
             </div>
             <SearchChips<Region>
@@ -465,31 +559,31 @@ export default function Wizard({
               hint="Para segmentar só alguns estados, tire o país correspondente da lista acima."
               account={d.accountId}
               op="regions"
-              extra={d.adset.countries.length === 1 ? { country: d.adset.countries[0] } : {}}
-              value={d.adset.regions}
+              extra={activeAdset.countries.length === 1 ? { country: activeAdset.countries[0] } : {}}
+              value={activeAdset.regions}
               idOf={(r) => r.key}
               nameOf={(r) => `${r.name}${r.country ? ` (${r.country})` : ""}`}
               onChange={(regions) => setA({ regions })}
             />
             <label className="choice">
-              <input type="checkbox" checked={d.adset.advantageAudience} onChange={(e) => setA({ advantageAudience: e.target.checked })} />
+              <input type="checkbox" checked={activeAdset.advantageAudience} onChange={(e) => setA({ advantageAudience: e.target.checked })} />
               <span><b>Público Advantage+</b><span className="block text-xs text-muted">Como no Gerenciador: a Meta pode ir além da segmentação. Idade, gênero, interesses e públicos viram sugestões; só os controles abaixo são obrigatórios.</span></span>
             </label>
-            {d.adset.advantageAudience && (
+            {activeAdset.advantageAudience && (
               <div className="grid sm:grid-cols-3 gap-3">
                 <label className="field">
                   <span className="label">Controle: idade mínima (18 a 25)</span>
-                  <input className="input num" type="number" min={18} max={25} value={d.adset.ageMinControl} onChange={(e) => setA({ ageMinControl: Number(e.target.value) })} />
+                  <input className="input num" type="number" min={18} max={25} value={activeAdset.ageMinControl} onChange={(e) => setA({ ageMinControl: Number(e.target.value) })} />
                 </label>
                 <p className="sm:col-span-2 text-xs text-muted self-end">Regra da Meta no Público Advantage+: o mínimo obrigatório vai até 25 e o máximo é sempre 65+. Para mirar 45+, use a sugestão de idade abaixo.</p>
               </div>
             )}
-            {d.adset.advantageAudience && <span className="label !mb-0">Sugestão de público (opcional)</span>}
+            {activeAdset.advantageAudience && <span className="label !mb-0">Sugestão de público (opcional)</span>}
             <div className="grid sm:grid-cols-3 gap-3">
-              <label className="field"><span className="label">{d.adset.advantageAudience ? "Sugestão: idade de" : "Idade mínima"}</span><input className="input num" type="number" min={d.adset.advantageAudience ? 18 : 13} max={65} value={d.adset.ageMin} onChange={(e) => setA({ ageMin: Number(e.target.value) })} /></label>
-              <label className="field"><span className="label">{d.adset.advantageAudience ? "Sugestão: idade até" : "Idade máxima"}</span><input className="input num" type="number" min={13} max={65} value={d.adset.ageMax} onChange={(e) => setA({ ageMax: Number(e.target.value) })} /></label>
+              <label className="field"><span className="label">{activeAdset.advantageAudience ? "Sugestão: idade de" : "Idade mínima"}</span><input className="input num" type="number" min={activeAdset.advantageAudience ? 18 : 13} max={65} value={activeAdset.ageMin} onChange={(e) => setA({ ageMin: Number(e.target.value) })} /></label>
+              <label className="field"><span className="label">{activeAdset.advantageAudience ? "Sugestão: idade até" : "Idade máxima"}</span><input className="input num" type="number" min={13} max={65} value={activeAdset.ageMax} onChange={(e) => setA({ ageMax: Number(e.target.value) })} /></label>
               <label className="field"><span className="label">Gênero</span>
-                <select className="select" value={d.adset.genders} onChange={(e) => setA({ genders: e.target.value as any })}>
+                <select className="select" value={activeAdset.genders} onChange={(e) => setA({ genders: e.target.value as any })}>
                   <option value="all">Todos</option><option value="male">Homens</option><option value="female">Mulheres</option>
                 </select>
               </label>
@@ -498,28 +592,28 @@ export default function Wizard({
               title="Interesses (segmentação detalhada)"
               account={d.accountId}
               op="interests"
-              value={d.adset.interests}
+              value={activeAdset.interests}
               idOf={(i) => i.id}
               nameOf={(i) => i.name}
               onChange={(interests) => setA({ interests })}
             />
             <div className="grid md:grid-cols-2 gap-3">
-              <AudiencePick title="Públicos personalizados (incluir)" list={look.audiences} value={d.adset.audiences} onChange={(audiences) => setA({ audiences })} />
-              <AudiencePick title="Excluir públicos" list={look.audiences} value={d.adset.excludedAudiences} onChange={(excludedAudiences) => setA({ excludedAudiences })} />
+              <AudiencePick title="Públicos personalizados (incluir)" list={look.audiences} value={activeAdset.audiences} onChange={(audiences) => setA({ audiences })} />
+              <AudiencePick title="Excluir públicos" list={look.audiences} value={activeAdset.excludedAudiences} onChange={(excludedAudiences) => setA({ excludedAudiences })} />
             </div>
           </fieldset>
 
           <fieldset className="grid gap-3 border-t border-line pt-4">
             <legend className="font-semibold">Posicionamentos</legend>
             <div className="grid sm:grid-cols-2 gap-2">
-              <label className="choice"><input type="radio" checked={d.adset.placements === "auto"} onChange={() => setA({ placements: "auto" })} /><span><b>Advantage+ (automático)</b><span className="block text-xs text-muted">Recomendado pela Meta</span></span></label>
-              <label className="choice"><input type="radio" checked={d.adset.placements === "manual"} onChange={() => setA({ placements: "manual" })} /><span><b>Manual</b><span className="block text-xs text-muted">Escolha plataformas e posições</span></span></label>
+              <label className="choice"><input type="radio" checked={activeAdset.placements === "auto"} onChange={() => setA({ placements: "auto" })} /><span><b>Advantage+ (automático)</b><span className="block text-xs text-muted">Recomendado pela Meta</span></span></label>
+              <label className="choice"><input type="radio" checked={activeAdset.placements === "manual"} onChange={() => setA({ placements: "manual" })} /><span><b>Manual</b><span className="block text-xs text-muted">Escolha plataformas e posições</span></span></label>
             </div>
-            {d.adset.placements === "manual" && (
+            {activeAdset.placements === "manual" && (
               <div className="grid md:grid-cols-3 gap-3">
-                <CheckList title="Plataformas" options={PLATFORMS} value={d.adset.platforms} onChange={(platforms) => setA({ platforms })} />
-                {d.adset.platforms.includes("facebook") && <CheckList title="Facebook" options={FB_POSITIONS} value={d.adset.fbPositions} onChange={(fbPositions) => setA({ fbPositions })} />}
-                {d.adset.platforms.includes("instagram") && <CheckList title="Instagram" options={IG_POSITIONS} value={d.adset.igPositions} onChange={(igPositions) => setA({ igPositions })} />}
+                <CheckList title="Plataformas" options={PLATFORMS} value={activeAdset.platforms} onChange={(platforms) => setA({ platforms })} />
+                {activeAdset.platforms.includes("facebook") && <CheckList title="Facebook" options={FB_POSITIONS} value={activeAdset.fbPositions} onChange={(fbPositions) => setA({ fbPositions })} />}
+                {activeAdset.platforms.includes("instagram") && <CheckList title="Instagram" options={IG_POSITIONS} value={activeAdset.igPositions} onChange={(igPositions) => setA({ igPositions })} />}
               </div>
             )}
           </fieldset>
@@ -579,6 +673,34 @@ export default function Wizard({
                     );
                   })}
                 </div>
+              </div>
+            )}
+            {(!catalog || autoCat) && chosenMedia.length > 0 && (d.adsetGroups?.length ?? 0) > 0 && (
+              <div className="border border-line rounded-xl p-3 space-y-3">
+                <div>
+                  <p className="font-semibold">Distribuir criativos entre os conjuntos</p>
+                  <p className="text-xs text-muted">Marque exatamente quais anúncios vão em cada conjunto. Ex.: 3 conjuntos com 4 criativos cada. Um arquivo pode ser reutilizado em mais de um conjunto.</p>
+                </div>
+                {groups.map((g, index) => (
+                  <div key={g.id} className="border-t border-line pt-3 space-y-2">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <span className="font-semibold text-sm">{index + 1}. {g.settings.name || "Conjunto sem nome"} — {g.mediaIds.length} selecionado(s)</span>
+                      <div className="flex gap-2">
+                        <button type="button" className="btn btn-sm" onClick={() => assignMediaToGroup(g.id, [...d.creative.mediaIds])}>Todos</button>
+                        <button type="button" className="btn btn-sm" onClick={() => assignMediaToGroup(g.id, [])}>Nenhum</button>
+                      </div>
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {chosenMedia.map((m) => (
+                        <label key={m.id} className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={g.mediaIds.includes(m.id)}
+                            onChange={(e) => assignMediaToGroup(g.id, e.target.checked ? [...g.mediaIds, m.id] : g.mediaIds.filter((id) => id !== m.id))} />
+                          <span className="truncate">{m.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {autoCat && (
@@ -664,6 +786,9 @@ export default function Wizard({
             </section>
           )}
           <Summary title="Conjunto" onEdit={() => setStep(2)} rows={[
+            ["Estrutura", `1 campanha · ${structure.adsets} conjunto(s) · ${structure.ads} anúncio(s)`],
+            ["Conjuntos", groups.map((g) => `${g.settings.name || "Sem nome"} (${adsPerGroup(d, g)} anúncio(s)${d.campaign.budgetLevel === "adset" ? `, ${money(g.settings.budget, cur)}` : ""})`).join(" · ")],
+            ...(d.campaign.budgetLevel === "adset" ? [["Orçamento somado dos conjuntos", money(groups.reduce((sum, g) => sum + Number(g.settings.budget || 0), 0), cur)] as [string, string]] : []),
             ["Nome", d.adset.name || "—"],
             ["Otimização", label(GOALS[d.campaign.objective], d.adset.optimizationGoal)],
             ...(d.adset.pixelId ? [["Pixel / evento", `${look.pixels.find((p) => p.id === d.adset.pixelId)?.name ?? d.adset.pixelId} · ${label(EVENTS, d.adset.event)}`] as [string, string]] : []),
@@ -680,7 +805,7 @@ export default function Wizard({
             [catalog ? "Apresentação" : "Anúncios", catalog ? `${label(CATALOG_FORMATS, d.creative.catalogFormat)}${d.catalog.preferVideo ? " · priorizando vídeo" : ""}` : `${d.creative.mediaIds.length} (um por mídia)`],
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
-              ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, em conjuntos separados)` : "1 com todos os produtos"] as [string, string],
+              ["Anúncios", `${structure.ads} anúncio(s) em ${structure.adsets} conjunto(s)`] as [string, string],
               ["Vídeos", d.catalog.delayMinutes > 0 ? `Atualização agendada em ${d.catalog.delayMinutes} minuto(s) após a criação dos anúncios` : "Na criação dos produtos"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
@@ -697,12 +822,12 @@ export default function Wizard({
           <div className="panel panel-pad space-y-3">
             <h2>O que vai acontecer</h2>
             <ol className="text-sm text-muted list-decimal pl-5 space-y-0.5">
-              <li>Criação da campanha e do conjunto na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
+              <li>Criação de 1 campanha, {structure.adsets} conjunto(s) e {structure.ads} anúncio(s) na conta {account?.name}{d.extraAccountIds.length ? ` e em mais ${d.extraAccountIds.length} conta(s) — um processo por conta` : ""}.</li>
               {autoCat && <li>Catálogo do Business Manager da conta (reaproveitado, ou criado uma única vez).</li>}
               {autoCat && <li>Criação de {d.creative.mediaIds.length * d.catalog.productsPerCreative} produto(s) em lote e do conjunto de produtos da campanha.</li>}
               {autoCat && d.catalog.delayMinutes > 0 && chosenMedia.some((m) => m.kind === "video") && <li>Agendamento da inclusão dos vídeos nos produtos após {d.catalog.delayMinutes} minuto(s), com processamento e revisão aplicáveis pela Meta.</li>}
               {!catalog && <li>Upload de {d.creative.mediaIds.length} mídia(s) para a conta (as já enviadas antes são reaproveitadas).</li>}
-              <li>Criação de {catalog ? (autoCat && d.catalog.adsMode === "per_creative" ? d.creative.mediaIds.length : 1) : d.creative.mediaIds.length} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
+              <li>Criação de {structure.ads} criativo(s) e anúncio(s), com status {d.campaign.status === "ACTIVE" ? "ativo" : "pausado"}.</li>
               <li>Acompanhamento da revisão da Meta até aprovar ou apontar problema.</li>
             </ol>
             <p className="text-xs text-muted">Cada etapa aparece na tela de processamento. Se cair a conexão ou você recarregar, nada é criado em dobro.</p>
@@ -1017,6 +1142,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
 
       <div>
         <span className="label">Distribuição dos anúncios</span>
+        <p className="text-xs text-muted">A quantidade de conjuntos é configurada na etapa Conjuntos. Um anúncio por criativo não significa um conjunto por anúncio.</p>
         <div className="grid sm:grid-cols-2 gap-2">
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode !== "per_creative"} onChange={() => setK({ adsMode: "single" })} />
@@ -1024,12 +1150,19 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           </label>
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode === "per_creative"} onChange={() => setK({ adsMode: "per_creative" })} />
-            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cada anúncio terá um conjunto próprio com somente seus produtos/vídeo. Se o orçamento estiver no conjunto, o valor será dividido entre os conjuntos.</span></span>
+            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cria a quantidade de anúncios selecionada em cada conjunto, sem criar conjuntos extras. No catálogo dinâmico, a Meta pode escolher produtos do mesmo conjunto.</span></span>
           </label>
         </div>
       </div>
 
       <PreferVideo d={d} setK={setK} />
+      {d.catalog.adsMode === "per_creative" && adsetGroupsFor(d).some((g) => g.mediaIds.length > 1) && (
+        <p className="notice notice-warn text-sm">
+          A Meta pode repetir o mesmo vídeo quando anúncios de catálogo compartilham o mesmo conjunto de produtos.
+          Para garantir um vídeo diferente por anúncio em 1 campanha → 1 conjunto → vários anúncios,
+          use o modo Imagens e vídeos (criativos individuais). O modo catálogo não permite garantir essa associação.
+        </p>
+      )}
 
       {chosen.some((m) => m.kind === "video") && (
         <label className="field">
