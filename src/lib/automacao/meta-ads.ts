@@ -67,20 +67,12 @@ export async function listBusinessCatalogs(auth: MetaAuth, businessId: string): 
  * conta de cliente/parceiro (e que o perfil conectado enxerga).
  */
 export async function accountBusiness(auth: MetaAuth, act: string): Promise<{ id: string; name: string } | null> {
-  const info = await accountInfo(auth, act);
-  if (info.business?.id) return info.business;
-  const [agencies, mine] = await Promise.all([
-    graphAll<{ id: string; name: string }>(`${act}/agencies`, { fields: "id,name" }, auth, 2).catch(() => [] as { id: string; name: string }[]),
-    listBusinesses(auth).catch(() => [] as { id: string; name: string }[]),
-  ]);
-  // Prefere um BM que o perfil também acessa; senão, o BM que a Meta diz ter a conta
-  const viaAgency = agencies.find((a) => mine.some((m) => m.id === a.id)) ?? agencies[0];
-  if (viaAgency) return viaAgency;
-  for (const b of mine.slice(0, 20)) {
-    const accs = await graphAll<{ id: string }>(`${b.id}/client_ad_accounts`, { fields: "id" }, auth, 5).catch(() => [] as { id: string }[]);
-    if (accs.some((a) => a.id === act)) return b;
-  }
-  return null;
+  const choices = await catalogBusinessesForAccount(auth, act);
+  const partners = choices.filter((b) => b.relation === "partner");
+  // Nunca priorize info.business (BM dona) se o perfil possui uma BM parceira.
+  if (partners.length === 1) return partners[0];
+  if (partners.length > 1) return null; // Configuração ambígua: escolha manualmente para catálogos.
+  return choices.find((b) => b.relation === "owner") ?? null;
 }
 
 export type CatalogBusinessCandidate = {
@@ -155,8 +147,10 @@ export async function resolveCatalogBusiness(
 
 /** Catálogos que a conta de anúncio pode usar (os do BM em que ela está). */
 export async function listAccountCatalogs(auth: MetaAuth, act: string): Promise<Catalog[]> {
-  const bm = await accountBusiness(auth, act);
-  return bm ? listBusinessCatalogs(auth, bm.id) : [];
+  const choices = await catalogBusinessesForAccount(auth, act);
+  const all = await Promise.all(choices.map((bm) => listBusinessCatalogs(auth, bm.id)));
+  const seen = new Set<string>();
+  return all.flat().filter((cat) => !seen.has(cat.id) && seen.add(cat.id));
 }
 
 export async function createCatalog(auth: MetaAuth, businessId: string, name: string) {
