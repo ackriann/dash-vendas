@@ -481,7 +481,7 @@ export default function Wizard({
               </div>
             )}
             {autoCat && d.catalog.adsMode === "per_creative" && activeGroup.mediaIds.length > 1 && (
-              <p className="notice notice-warn text-sm">Catálogo dinâmico: a Meta pode selecionar qualquer vídeo dos produtos deste conjunto. Para um vídeo fixo diferente por anúncio, escolha o modo de criativos de mídia.</p>
+              <p className="notice notice-warn text-sm">Teste de catálogo individual: cada anúncio terá seu próprio conjunto de produtos, mesmo compartilhando este conjunto de anúncios. A API da Meta validará todas as associações antes de criar os anúncios; algumas contas podem rejeitar o formato. Publique inicialmente como Pausada.</p>
             )}
           </div>
           <div className="grid md:grid-cols-2 gap-3">
@@ -1150,7 +1150,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           </label>
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode === "per_creative"} onChange={() => setK({ adsMode: "per_creative" })} />
-            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cria a quantidade de anúncios selecionada em cada conjunto, sem criar conjuntos extras. No catálogo dinâmico, a Meta pode escolher produtos do mesmo conjunto.</span></span>
+            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Um conjunto de produtos exclusivo para cada anúncio, sem criar conjuntos de anúncios extras. A disponibilidade depende da validação da Meta.</span></span>
           </label>
         </div>
       </div>
@@ -1158,9 +1158,10 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
       <PreferVideo d={d} setK={setK} />
       {d.catalog.adsMode === "per_creative" && adsetGroupsFor(d).some((g) => g.mediaIds.length > 1) && (
         <p className="notice notice-warn text-sm">
-          A Meta pode repetir o mesmo vídeo quando anúncios de catálogo compartilham o mesmo conjunto de produtos.
-          Para garantir um vídeo diferente por anúncio em 1 campanha → 1 conjunto → vários anúncios,
-          use o modo Imagens e vídeos (criativos individuais). O modo catálogo não permite garantir essa associação.
+          Modo catálogo com vídeos exclusivos: o painel cria um conjunto de produtos por criativo
+          e verifica a compatibilidade com a API da Meta, sem criar anúncios na validação.
+          Se a Meta não aceitar subconjuntos diferentes em um único conjunto de anúncios, a publicação falhará
+          com a mensagem real — sem misturar os vídeos. Para testar, defina a campanha como Pausada.
         </p>
       )}
 
