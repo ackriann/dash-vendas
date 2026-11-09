@@ -225,7 +225,9 @@ export default async function Catalogo({ params, searchParams }: { params: Promi
                     <form action={runScheduleNowAction}>
                       <input type="hidden" name="id" value={s.id} />
                       <input type="hidden" name="back" value={`${base}&aba=historico`} />
-                      <SubmitButton className="btn btn-sm" pendingText="…">Executar agora</SubmitButton>
+                      <SubmitButton className="btn btn-sm btn-primary" pendingText="Enviando…" confirm={s.update_type === "set_media" ? "Enviar agora as novas mídias para o catálogo? A Meta pode analisar novamente os vídeos." : undefined}>
+                        {s.update_type === "set_media" ? "Atualizar vídeos agora" : "Executar agora"}
+                      </SubmitButton>
                     </form>
                   )}
                   <form action={deleteScheduleAction}>
@@ -242,8 +244,9 @@ export default async function Catalogo({ params, searchParams }: { params: Promi
           <section className="panel panel-pad space-y-3">
             <h2>Nova atualização programada</h2>
             <p className="notice notice-warn text-sm">
-              Cada alteração é enviada pela API oficial e passa de novo pela revisão da Meta — o anúncio mostra o produto como está no catálogo,
-              para todos. Se a Meta reprovar um produto, a automação é pausada sozinha. Ela roda pelo <Link className="underline" href="/regras">Agendador</Link> (mesma URL das regras).
+              Atualize manualmente com o botão acima sem precisar de cron (também funciona no plano gratuito).
+              Para o delay automático continuar mesmo com o painel fechado, configure um serviço de cron gratuito em <Link className="underline" href="/regras">Regras → Agendador</Link>.
+              As atualizações são enviadas pela API oficial; a Meta pode processar e revisar as novas mídias antes de exibi-las.
             </p>
             <form action={saveScheduleAction} className="grid md:grid-cols-2 gap-3">
               <input type="hidden" name="profile" value={profile.id} />
