@@ -82,7 +82,7 @@ registerExecutor("adset", async (ctx) => {
   const d = draftOf(ctx);
   const campaignId = ctx.done.campaign?.id;
   if (!campaignId) throw new Error("A campanha ainda não foi criada.");
-  const a = d.adset;
+  const a = (ctx.job.input.settings as DraftData["adset"] | undefined) ?? d.adset;
   const c = d.campaign;
   const productSetKey = ctx.job.input.productSetKey as string | undefined;
   const ownProductSetId = productSetKey ? ctx.done[productSetKey]?.id : undefined;
@@ -267,9 +267,11 @@ registerExecutor("creative", async (ctx) => {
   if (mediaKey && !media) throw new Error("A mídia deste anúncio ainda não está pronta.");
   const setKey = ctx.job.input.productSetKey as string | undefined;
   if (setKey && !ctx.done[setKey]?.id) throw new Error("O conjunto de produtos deste anúncio ainda não foi criado.");
-  const r = await makeCreative(ctx, d, auth, media, setKey ? ctx.done[setKey].id : undefined);
+  const settings = (ctx.job.input.settings as DraftData["adset"] | undefined) ?? d.adset;
+  const configuredDraft = { ...d, adset: { ...d.adset, ...settings } };
+  const r = await makeCreative(ctx, configuredDraft, auth, media, setKey ? ctx.done[setKey].id : undefined);
   return { status: "done", metaId: r.id,
-    result: { id: r.id, product_set_id: setKey ? ctx.done[setKey].id : d.adset.productSetId },
+    result: { id: r.id, product_set_id: setKey ? ctx.done[setKey].id : settings.productSetId },
     message: `Criativo ${r.id}`,
   };
 });
