@@ -680,7 +680,7 @@ export default function Wizard({
             [catalog ? "Apresentação" : "Anúncios", catalog ? `${label(CATALOG_FORMATS, d.creative.catalogFormat)}${d.catalog.preferVideo ? " · priorizando vídeo" : ""}` : `${d.creative.mediaIds.length} (um por mídia)`],
             ...(autoCat ? [
               ["Produtos", `${d.creative.mediaIds.length * d.catalog.productsPerCreative} (${d.catalog.productsPerCreative} por criativo) · ${money(d.catalog.price, cur)}`] as [string, string],
-              ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, no mesmo conjunto)` : "1 com todos os produtos"] as [string, string],
+              ["Anúncios", d.catalog.adsMode === "per_creative" ? `${d.creative.mediaIds.length} (um por criativo, em conjuntos separados)` : "1 com todos os produtos"] as [string, string],
               ["Vídeos", d.catalog.delayMinutes > 0 ? `Atualização agendada em ${d.catalog.delayMinutes} minuto(s) após a criação dos anúncios` : "Na criação dos produtos"] as [string, string],
             ] : []),
             ["Botão / destino", `${label(CTAS, d.creative.cta)} → ${d.creative.url || "—"}`],
@@ -1016,7 +1016,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
       )}
 
       <div>
-        <span className="label">Anúncios no conjunto</span>
+        <span className="label">Distribuição dos anúncios</span>
         <div className="grid sm:grid-cols-2 gap-2">
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode !== "per_creative"} onChange={() => setK({ adsMode: "single" })} />
@@ -1024,7 +1024,7 @@ function CatalogSetup({ d, chosen, media, productImage, onProductImage, onUpload
           </label>
           <label className="choice">
             <input type="radio" checked={d.catalog.adsMode === "per_creative"} onChange={() => setK({ adsMode: "per_creative" })} />
-            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Vários anúncios no mesmo conjunto, cada um com os produtos do seu criativo</span></span>
+            <span><b>Um anúncio por criativo</b>{chosen.length > 1 ? ` (${chosen.length})` : ""}<span className="block text-xs text-muted">Cada anúncio terá um conjunto próprio com somente seus produtos/vídeo. Se o orçamento estiver no conjunto, o valor será dividido entre os conjuntos.</span></span>
           </label>
         </div>
       </div>
