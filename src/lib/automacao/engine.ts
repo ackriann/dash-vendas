@@ -230,7 +230,7 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
       key: adsetKey,
       kind: "adset",
       label: `Criação do conjunto · ${group.settings.name}`,
-      input: { settings: group.settings, productSetKey, adsetName: group.settings.name, adsetCount: 1, adsetIndex: 1 },
+      input: { settings: group.settings, productSetKey, adsetName: groups.length > 1 ? `${group.settings.name.slice(0, 170)} · ${group.id}` : group.settings.name, adsetCount: 1, adsetIndex: 1 },
     });
 
     const mediaForGroup = group.mediaIds.map((id) => assets.find((m) => m.id === id)).filter((m): m is (typeof assets)[number] => Boolean(m));
@@ -239,7 +239,10 @@ async function publishJobs(d: DraftData, draftId: string): Promise<JobSpec[]> {
     for (const m of entries) {
       serial++;
       const suffix = groups.length === 1 ? String(serial) : `${group.id}:${serial}`;
-      const adName = adNameFor(d.creative.adName, serial, m?.name ?? (d.creative.mode === "catalog" ? "Catálogo" : null), groups.reduce((n, g) => n + (multipleAds ? g.mediaIds.length : 1), 0));
+      const baseAdName = adNameFor(d.creative.adName, serial, m?.name ?? (d.creative.mode === "catalog" ? "Catálogo" : null), groups.reduce((n, g) => n + (multipleAds ? g.mediaIds.length : 1), 0));
+      // Evita nomes repetidos quando o mesmo criativo é usado em vários conjuntos.
+      // A recuperação idempotente busca o nome na Meta se a resposta anterior falhar.
+      const adName = groups.length > 1 ? `${baseAdName.slice(0, 180)} · conjunto ${group.id}` : baseAdName;
       const creativeKey = `creative:${suffix}`;
       jobs.push({
         key: creativeKey, kind: "creative", label: `Criativo · ${adName}`,
