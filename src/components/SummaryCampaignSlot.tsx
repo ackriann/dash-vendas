@@ -1,15 +1,16 @@
 import { buildAdRows, type AdRow } from "@/lib/ads";
-import type { Context } from "@/lib/report";
+import type { Context, SaleLite } from "@/lib/report";
 import type { DateRange } from "@/lib/dates";
 import { fmtDateTime } from "@/lib/dates";
 import SummaryCampaignClient from "./SummaryCampaignClient";
 
 export default async function SummaryCampaignSlot({
-  ctx, range, accountId, backHref, startDetailId,
+  ctx, range, accountId, backHref, startDetailId, sales,
 }: {
   ctx: Context;
   range: DateRange;
   accountId?: string;
+  sales: SaleLite[];
   backHref: string;
   startDetailId?: string;
 }) {
@@ -25,7 +26,7 @@ export default async function SummaryCampaignSlot({
 
   try {
     // Mesma origem e cálculo da aba Campanhas: Meta Marketing API + vendas rastreadas.
-    const { rows, errors } = await buildAdRows(ctx, accounts, "campaign", range);
+    const { rows, errors } = await buildAdRows(ctx, accounts, "campaign", range, sales);
     const data = rows
       .filter((row) => row.level === "campaign")
       .sort((a, b) => b.spend - a.spend || Number(b.effective === "ACTIVE") - Number(a.effective === "ACTIVE"));
@@ -34,6 +35,7 @@ export default async function SummaryCampaignSlot({
       <SummaryCampaignClient
         rows={data as AdRow[]}
         currency={ctx.base}
+        accountId={accountId}
         timezone={ctx.tz}
         range={range}
         backHref={backHref}
