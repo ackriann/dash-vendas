@@ -73,8 +73,8 @@ export default async function Criar({ searchParams, embedded = false }: { search
           Este rascunho já foi {draft.status === "queued" ? "enviado para publicação" : "publicado"}. Para criar outra campanha parecida, duplique.
         </p>
         <div className="flex gap-2">
-          {draft.run_id && <Link className="btn btn-primary" href={`/automacao/processos/${draft.run_id}`}>Ver processo</Link>}
-          {draft.data.extraAccountIds.length > 0 && <Link className="btn" href="/automacao/processos">Processos de todas as contas</Link>}
+          {draft.run_id && <Link className="btn btn-primary" href={embedded ? `/campanhas?painel=status&processo=${draft.run_id}` : `/automacao/processos/${draft.run_id}`}>Ver processo</Link>}
+          {draft.data.extraAccountIds.length > 0 && <Link className="btn" href={embedded ? "/campanhas?painel=status" : "/automacao/processos"}>Processos de todas as contas</Link>}
           <form action={duplicateDraftAction}>{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={draft.id} /><SubmitButton className="btn" pendingText="…">Duplicar rascunho</SubmitButton></form>
         </div>
       </div>
