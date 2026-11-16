@@ -34,7 +34,9 @@ export async function newDraftAction(formData: FormData) {
     .select("id")
     .single();
   if (error) go("/automacao", "erro", /auto_drafts/.test(error.message) ? "Rode a migração 005_automacao.sql no Supabase." : error.message);
-  redirect(`/automacao/criar?rascunho=${data.id}`);
+  redirect(str(formData, "surface") === "campanhas"
+    ? `/campanhas?painel=criar&rascunho=${data.id}`
+    : `/automacao/criar?rascunho=${data.id}`);
 }
 
 /** Salva o rascunho (chamado pelo assistente a cada alteração e no botão Salvar). */
@@ -87,7 +89,9 @@ export async function duplicateDraftAction(formData: FormData) {
     .select("id")
     .single();
   if (error) go("/automacao", "erro", error.message);
-  redirect(`/automacao/criar?rascunho=${row.id}`);
+  redirect(str(formData, "surface") === "campanhas"
+    ? `/campanhas?painel=criar&rascunho=${row.id}`
+    : `/automacao/criar?rascunho=${row.id}`);
 }
 
 export async function deleteDraftAction(formData: FormData) {
