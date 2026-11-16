@@ -1,4 +1,11 @@
 import Link from "next/link";
+import { Suspense } from "react";
+import Notice from "@/components/Notice";
+import SummaryCampaignSlot from "@/components/SummaryCampaignSlot";
+import CampaignModal from "@/components/CampaignModal";
+import CampaignStatusList from "@/components/CampaignStatusList";
+import Criar from "@/app/(painel)/automacao/criar/page";
+import Processo from "@/app/(painel)/automacao/processos/[id]/page";
 import { hourInTz, resolveRange } from "@/lib/dates";
 import { fmtMoney, fmtNum, fmtPct } from "@/lib/money";
 import { listObjects } from "@/lib/meta";
@@ -11,7 +18,10 @@ import SalesChart from "@/components/SalesChart";
 import DashBar from "@/components/DashBar";
 import { listDashboards } from "@/lib/dashboards";
 
-type SP = Promise<{ range?: string; since?: string; until?: string; conta?: string; plataforma?: string; produto?: string }>;
+type SP = Promise<{
+  range?: string; since?: string; until?: string; conta?: string; plataforma?: string; produto?: string;
+  painel?: string; rascunho?: string; processo?: string; detalhe?: string; ok?: string; erro?: string;
+}>;
 
 export default async function Dashboard({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
@@ -78,6 +88,19 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
   const keep = { conta: sp.conta, plataforma: sp.plataforma, produto: sp.produto };
   const rangeQs = `range=${range.key}${range.key === "custom" ? `&since=${range.since}&until=${range.until}` : ""}`;
   const filtered = !!(sp.plataforma || sp.produto);
+  const summaryQuery = new URLSearchParams();
+  summaryQuery.set("range", range.key);
+  if (range.key === "custom") {
+    summaryQuery.set("since", range.since);
+    summaryQuery.set("until", range.until);
+  }
+  if (sp.conta) summaryQuery.set("conta", sp.conta);
+  if (sp.plataforma) summaryQuery.set("plataforma", sp.plataforma);
+  if (sp.produto) summaryQuery.set("produto", sp.produto);
+  const summaryHref = `/?${summaryQuery.toString()}`;
+  const openModal = (panel: "criar" | "status", runId?: string) =>
+    `${summaryHref}&painel=${panel}${runId ? `&processo=${runId}` : ""}`;
+  const panel = sp.painel === "criar" || sp.painel === "status" ? sp.painel : null;
 
   return (
     <div className="space-y-5">
@@ -110,6 +133,8 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
         <button className="btn btn-sm">Filtrar</button>
         {(sp.conta || filtered) && <Link className="btn btn-sm" href={`/?${rangeQs}`}>Limpar</Link>}
       </form>
+
+      <Notice ok={sp.ok} erro={sp.erro} />
 
       {!ctx.profiles.length && (
         <p className="notice notice-warn">
@@ -151,6 +176,18 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
         <Stat label="Taxas e impostos" value={fmtMoney(s.saleFees + s.adsFees, cur)} hint={s.fixed ? `+ ${fmtMoney(s.fixed, cur)} custos fixos` : "das vendas e dos anúncios"} />
         <Stat label="Vendas rastreadas" value={s.approved ? fmtPct((tracked / s.approved) * 100, 0) : "—"} hint="com campanha identificada" />
       </section>
+
+      <Suspense fallback={
+        <section className="panel panel-pad space-y-3" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <h2>Campanhas</h2><span className="text-xs text-muted">Sincronizando com a Meta…</span>
+          </div>
+          <div className="h-36 bg-surface-2 animate-pulse rounded-xl" />
+        </section>
+      }>
+        <SummaryCampaignSlot ctx={ctx} range={range} accountId={sp.conta}
+          backHref={summaryHref} startDetailId={sp.detalhe} />
+      </Suspense>
 
       <section className="panel panel-pad">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -223,6 +260,18 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
           <Link href={`/campanhas?${rangeQs}`} className="btn btn-sm mt-4">Ver resultado por campanha</Link>
         </div>
       </section>
+      {panel && (
+        <CampaignModal title={panel === "criar" ? "Criar campanha" : "Status da publicação"}
+          closeHref={summaryHref}>
+          {panel === "criar"
+            ? <Criar searchParams={Promise.resolve({ rascunho: sp.rascunho, ok: sp.ok, erro: sp.erro })}
+                embedded embeddedSurface="resumo" />
+            : sp.processo && /^[0-9a-f-]{36}$/i.test(sp.processo)
+              ? <Processo params={Promise.resolve({ id: sp.processo })}
+                  searchParams={Promise.resolve({})} embedded embeddedSurface="resumo" />
+              : <CampaignStatusList hrefFor={(id) => openModal("status", id)} />}
+        </CampaignModal>
+      )}
     </div>
   );
 }
