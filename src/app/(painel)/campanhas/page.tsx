@@ -317,7 +317,7 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
             <Criar searchParams={Promise.resolve({ rascunho: sp.rascunho })} embedded />
           ) : panel === "status" ? (
             sp.processo && /^[0-9a-f-]{36}$/i.test(sp.processo)
-              ? <Processo params={Promise.resolve({ id: sp.processo })} searchParams={Promise.resolve({})} />
+              ? <Processo params={Promise.resolve({ id: sp.processo })} searchParams={Promise.resolve({})} embedded />
               : <CampaignStatusList hrefFor={(id) => open("status", { processo: id })} />
           ) : <Regras searchParams={Promise.resolve({ ok: sp.ok, erro: sp.erro })} embedded />}
         </CampaignModal>
