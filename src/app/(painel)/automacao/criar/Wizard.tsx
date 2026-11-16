@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import MediaUploader from "@/components/automacao/MediaUploader";
+import AccountMultiPicker from "@/components/automacao/AccountMultiPicker";
 import {
   BID_STRATEGIES, CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
   RECOMMENDED_URL_TAGS, STEP_LABELS, adsetGroupsFor, adsPerGroup, draftStructure, needsBidAmount, validateDraft,
@@ -81,6 +82,37 @@ export default function Wizard({
   const errors = useMemo(() => validateDraft(d), [d]);
   const account = accounts.find((a) => a.id === d.accountId);
   const cur = account?.currency ?? "BRL";
+  const selectedAccountIds = [d.accountId, ...d.extraAccountIds].filter(Boolean);
+  const updateAccountSelection = (ids: string[]) => setD((x) => {
+    const accountId = ids.includes(x.accountId) ? x.accountId : (ids[0] ?? "");
+    const extraAccountIds = ids.filter((id) => id !== accountId);
+    const changeMain = accountId !== x.accountId;
+    return {
+      ...x, accountId, extraAccountIds,
+      ...(changeMain ? {
+        adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+        adsetGroups: x.adsetGroups?.map((g) => ({
+          ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+        })) ?? [],
+        catalog: { ...x.catalog, businessId: "" },
+        campaign: { ...x.campaign, catalogId: "" },
+      } : {}),
+    };
+  });
+  const setMainAccount = (accountId: string) => {
+    if (accountId === d.accountId) return;
+    setD((x) => ({
+      ...x, accountId,
+      extraAccountIds: [...new Set([x.accountId, ...x.extraAccountIds].filter((id) => id && id !== accountId))],
+      adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+      adsetGroups: x.adsetGroups?.map((g) => ({
+        ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
+      })) ?? [],
+      catalog: { ...x.catalog, businessId: "" },
+      campaign: { ...x.campaign, catalogId: "" },
+    }));
+  };
+
   const page = pages.find((p) => p.id === d.creative.pageId);
   const catalog = d.creative.mode === "catalog";
   const autoCat = catalog && d.catalog.source === "auto";
@@ -266,6 +298,18 @@ export default function Wizard({
   }
 
   async function publish() {
+    const numberOfAccounts = new Set([d.accountId, ...d.extraAccountIds].filter(Boolean)).size;
+    if (numberOfAccounts > 1) {
+      const budget = d.campaign.budgetLevel === "campaign"
+        ? d.campaign.budget
+        : adsetGroupsFor(d).reduce((sum, g) => sum + (Number(g.settings.budget) || 0), 0);
+      if (!window.confirm(
+        `CONFIRMAR PUBLICAÇÃO EM ${numberOfAccounts} CONTAS\\n\\n` +
+        `Será criada uma campanha separada em cada conta selecionada.\\n` +
+        `Orçamento configurado por conta: ${account?.currency ?? "moeda da conta"} ${Number(budget ?? 0).toFixed(2)}.\\n` +
+        "Confirme que revisou as contas, orçamentos e permissões."
+      )) return;
+    }
     setPublishing(true);
     setServerErrors([]);
     const r: { runId?: string; runIds?: string[]; errors?: string[] } = await publishDraftAction(draftId, d).catch((e) => ({ errors: [String(e?.message ?? e)] }));
@@ -315,30 +359,17 @@ export default function Wizard({
         <section className="panel panel-pad grid gap-4">
           <h2>Campanha</h2>
           <div className="grid md:grid-cols-2 gap-3">
-            <label className="field">
-              <span className="label">Conta de anúncio {d.extraAccountIds.length ? "principal" : "conectada"}</span>
-              <select className="select" value={d.accountId} onChange={(e) => setD((x) => ({ ...x, accountId: e.target.value, extraAccountIds: x.extraAccountIds.filter((a) => a !== e.target.value), adset: { ...x.adset, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
-                    adsetGroups: x.adsetGroups?.map((g) => ({
-                      ...g, settings: { ...g.settings, pixelId: "", audiences: [], excludedAudiences: [], productSetId: "" },
-                    })) ?? [], catalog: { ...x.catalog, businessId: "" }, campaign: { ...x.campaign, catalogId: "" } }))}>
-                <option value="">Escolha…</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}{a.account_status && a.account_status !== 1 ? " — não ativa" : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
+            <div className="md:col-span-2">
+              <AccountMultiPicker accounts={accounts} selectedIds={selectedAccountIds}
+                primaryId={d.accountId} onChange={updateAccountSelection}
+                onPrimaryChange={setMainAccount} />
+            </div>
+            <label className="field md:col-span-2">
               <span className="label">Nome da campanha</span>
               <input className="input" value={d.campaign.name} maxLength={200} onChange={(e) => setC({ name: e.target.value })} placeholder="Ex.: [VENDAS] Produto X — Broad" />
             </label>
           </div>
 
-          <ExtraAccounts
-            accounts={accounts}
-            main={account}
-            value={d.extraAccountIds}
-            onChange={(extraAccountIds) => setD((x) => ({ ...x, extraAccountIds }))}
-          />
           {d.extraAccountIds.length > 0 && <AccountChecks checks={checks} main={account} d={d} pixelName={look.pixels.find((p) => p.id === d.adset.pixelId)?.name} catalogName={autoCat ? "Automático" : look.catalogs.find((c) => c.id === d.campaign.catalogId)?.name} />}
 
           <div>
@@ -927,61 +958,6 @@ function StepNav({ step, setStep }: { step: number; setStep: (n: number) => void
   );
 }
 
-function ExtraAccounts({ accounts, main, value, onChange }: { accounts: AccountLite[]; main?: AccountLite; value: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(value.length > 0);
-  const [q, setQ] = useState("");
-  const others = accounts.filter((a) => a.id !== main?.id);
-  const terms = norm(q).split(/\s+/).filter(Boolean);
-  const shown = others.filter((a) => terms.every((t) => norm(`${a.name} ${a.id} ${a.profile_name}`).includes(t)));
-  const chosen = value.map((id) => accounts.find((a) => a.id === id)).filter(Boolean) as AccountLite[];
-  const otherCurrency = main ? chosen.filter((a) => a.currency !== main.currency) : [];
-  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
-
-  if (!open) {
-    return others.length ? (
-      <button type="button" className="text-sm text-info text-left" onClick={() => setOpen(true)}>+ Publicar também em outras contas de anúncio</button>
-    ) : null;
-  }
-  return (
-    <div className="grid gap-2">
-      <span className="label !mb-0 flex items-center justify-between gap-2">
-        Publicar também em outras contas ({value.length} marcada(s))
-        {value.length > 0 && <button type="button" className="text-info text-xs" onClick={() => onChange([])}>Limpar</button>}
-      </span>
-      {chosen.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {chosen.map((a) => <span key={a.id} className="chip">{a.name}<button type="button" onClick={() => toggle(a.id)} aria-label={`Remover ${a.name}`}>×</button></span>)}
-        </div>
-      )}
-      <input type="search" className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Pesquisar conta por nome, ID ou perfil…" />
-      <div className="flex items-center justify-between text-xs text-muted">
-        <span>{shown.length} conta(s){q ? " encontrada(s)" : ""}</span>
-        {shown.length > 0 && (
-          <button type="button" className="text-info" onClick={() => onChange([...new Set([...value, ...shown.map((a) => a.id)])])}>Marcar {q ? "as encontradas" : "todas"}</button>
-        )}
-      </div>
-      <ul className="divide-y divide-[#1f3a44] border border-line rounded-xl max-h-64 overflow-y-auto">
-        {shown.map((a) => (
-          <li key={a.id}>
-            <label className="flex items-center gap-3 px-3 py-2 cursor-pointer">
-              <input type="checkbox" checked={value.includes(a.id)} onChange={() => toggle(a.id)} />
-              <span className="flex-1 min-w-0">
-                <span className="block truncate text-sm">{a.name}</span>
-                <span className="text-xs text-muted">{a.id.replace("act_", "")} · {a.currency} · {a.profile_name}{a.account_status && a.account_status !== 1 ? " · não ativa" : ""}</span>
-              </span>
-            </label>
-          </li>
-        ))}
-        {!shown.length && <li className="px-3 py-3 text-sm text-muted">Nenhuma conta encontrada.</li>}
-      </ul>
-      {otherCurrency.length > 0 && (
-        <p className="notice notice-warn text-sm">Moeda diferente da conta principal ({main?.currency}): {otherCurrency.map((a) => `${a.name} (${a.currency})`).join(", ")}. Remova essas contas: o orçamento seria lido em outra moeda e a publicação é bloqueada.</p>
-      )}
-      <span className="text-xs text-muted">A mesma campanha é criada em cada conta marcada, com o mesmo orçamento, público e criativos. O mesmo pixel é usado em todas as contas onde ele for encontrado, mesmo em BMs diferentes.</span>
-    </div>
-  );
-}
-
 const TONE: Record<Status, string> = { none: "text-muted", ok: "pos", share: "text-info", own: "text-spend", error: "neg" };
 
 function AccountChecks({ checks, main, d, pixelName, catalogName }: { checks: Checks; main?: AccountLite; d: DraftData; pixelName?: string; catalogName?: string }) {
@@ -1046,9 +1022,7 @@ function AccountChecks({ checks, main, d, pixelName, catalogName }: { checks: Ch
   );
 }
 
-function norm(s: string) {
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
+
 
 function NewCatalog({ accountId, onCreated }: { accountId: string; onCreated: (c: { id: string; name: string }) => void }) {
   const [open, setOpen] = useState(false);
