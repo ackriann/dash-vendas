@@ -10,10 +10,17 @@ import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
 import ColumnPicker from "@/components/ColumnPicker";
 import { duplicate, toggleStatus, updateBudget } from "./actions";
+import CampaignModal from "@/components/CampaignModal";
+import CampaignStatusList from "@/components/CampaignStatusList";
+import Criar from "@/app/(painel)/automacao/criar/page";
+import Processo from "@/app/(painel)/automacao/processos/[id]/page";
+import Regras from "@/app/(painel)/regras/page";
+import { listRuns } from "@/lib/automacao/engine";
 
 type SP = Promise<{
   range?: string; since?: string; until?: string; level?: string; perfil?: string; conta?: string; parent?: string;
   todos?: string; q?: string; status?: string; ordem?: string; dir?: string; ok?: string; erro?: string;
+  painel?: string; rascunho?: string; processo?: string;
 }>;
 
 const LEVELS: [AdLevel, string][] = [["account", "Contas"], ["campaign", "Campanhas"], ["adset", "Conjuntos"], ["ad", "Anúncios"]];
@@ -32,7 +39,9 @@ function fmtMetric(m: MetricDef, v: number | null, cur: string): string {
 
 export default async function Campanhas({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
-  const [ctx, dashes] = await Promise.all([getContext({ useDash: true }), listDashboards()]);
+  const [ctx, dashes, recentRuns] = await Promise.all([
+    getContext({ useDash: true }), listDashboards(), listRuns(12, "publish"),
+  ]);
   const range = resolveRange(sp, ctx.tz);
   const level: AdLevel = LEVELS.some(([l]) => l === sp.level) ? (sp.level as AdLevel) : "campaign";
   const showAll = sp.todos === "1";
@@ -47,6 +56,11 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
     return `/campanhas?${p}`;
   };
   const backUrl = qs({});
+  const open = (painel: "criar" | "status" | "regras", extras: Record<string, string> = {}) =>
+    qs({ painel, ...extras });
+  const panel = ["criar", "status", "regras"].includes(sp.painel ?? "") ? sp.painel : null;
+  const runningCount = recentRuns.filter((run) => run.status === "running" || run.status === "queued").length;
+  const failedCount = recentRuns.filter((run) => run.status === "failed").length;
 
   if (!ctx.accounts.length) {
     return (
@@ -105,10 +119,19 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
           <h1>Campanhas{ctx.dash ? ` · ${ctx.dash.name}` : ""}</h1>
-          <p className="sub">{range.label} · vendas reais cruzadas com o gasto da Meta</p>
+          <p className="sub">{range.label} · gastos e resultados da Meta + vendas reais identificadas</p>
         </div>
         <RangeFilter range={range} path="/campanhas" keep={keep} />
       </header>
+      <div className="flex flex-wrap gap-2 items-center">
+        <Link className="btn btn-primary" href={open("criar")}>+ Criar nova campanha</Link>
+        <Link className="btn" href={open("status")}>
+          Status {runningCount > 0 ? `· ${runningCount} vinculando` : ""}
+          {failedCount > 0 ? ` · ${failedCount} falha(s)` : ""}
+        </Link>
+        <Link className="btn" href={open("regras")}>Regras automáticas</Link>
+        <span className="text-xs text-muted">Criação, acompanhamento e regras em um único lugar</span>
+      </div>
 
       <Notice ok={sp.ok} erro={sp.erro} />
       {errors.map((e) => <p key={e} className="notice notice-err">Meta — {e}</p>)}
@@ -279,9 +302,23 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
         </table>
       </section>
       <p className="sub">
+        Dados de anúncios: Meta Marketing API, no período selecionado. Vendas e faturamento: integrações próprias identificadas por UTMs.
         Orçamentos ficam na moeda de cada conta. Lucro = faturamento − taxas − gasto (custos fixos por dia só entram no Resumo).
-        A coluna “Compras Meta” mostra o que o pixel atribuiu, para comparar com as vendas reais.
+        “Compras Meta” são conversões atribuídas pela Meta, não necessariamente iguais às vendas confirmadas.
+        Totais refletem apenas as linhas atualmente filtradas; frequência e alcance agregados podem incluir pessoas repetidas entre campanhas.
       </p>
+      {panel && (
+        <CampaignModal title={panel === "criar" ? "Criar campanha" : panel === "status" ? "Status da publicação" : "Regras automáticas"}
+          closeHref={backUrl}>
+          {panel === "criar" ? (
+            <Criar searchParams={Promise.resolve({ rascunho: sp.rascunho })} embedded />
+          ) : panel === "status" ? (
+            sp.processo && /^[0-9a-f-]{36}$/i.test(sp.processo)
+              ? <Processo params={Promise.resolve({ id: sp.processo })} searchParams={Promise.resolve({})} />
+              : <CampaignStatusList hrefFor={(id) => open("status", { processo: id })} />
+          ) : <Regras searchParams={Promise.resolve({ ok: sp.ok, erro: sp.erro })} embedded />}
+        </CampaignModal>
+      )}
     </div>
   );
 }
