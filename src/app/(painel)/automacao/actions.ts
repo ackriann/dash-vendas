@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/session";
 import { db, getSetting, setSetting } from "@/lib/db";
-import { authForAccount, profileAuth } from "@/lib/profiles";
+import { authForAccount, listAccounts, profileAuth } from "@/lib/profiles";
 import { accountBusiness, createCatalog, getProduct, resolveCatalogBusiness } from "@/lib/automacao/meta-ads";
 import { deleteMedia, getMediaMany } from "@/lib/automacao/media";
 import { cancelRun, enqueueCatalogUpdate, enqueuePageSync, fixAndContinue, getDraft, publishDraft, recoverCatalogPublication, retryRun, runDueSchedules } from "@/lib/automacao/engine";
@@ -27,10 +27,19 @@ const backOf = (f: FormData, fallback: string) => {
 
 export async function newDraftAction(formData: FormData) {
   await requireAuth();
-  const account = str(formData, "account");
+  const requestedPrimary = str(formData, "account");
+  const requestedIds = [...new Set(formData.getAll("accounts").map((id) => String(id)))];
+  // Compatível com o formulário antigo, que envia somente a conta principal.
+  if (!requestedIds.length && requestedPrimary) requestedIds.push(requestedPrimary);
+  const available = new Set((await listAccounts()).map((account) => account.id));
+  const selected = requestedIds.filter((id) => /^act_\d+$/.test(id) && available.has(id));
+  if (!selected.length) go("/campanhas?painel=criar", "erro", "Selecione pelo menos uma conta conectada.");
+  const account = selected.includes(requestedPrimary) ? requestedPrimary : selected[0];
+  const draft = emptyDraft(account);
+  draft.extraAccountIds = selected.filter((id) => id !== account);
   const { data, error } = await db()
     .from("auto_drafts")
-    .insert({ name: "Nova campanha", account_id: account || null, data: emptyDraft(account) })
+    .insert({ name: "Nova campanha", account_id: account, data: draft })
     .select("id")
     .single();
   if (error) go("/automacao", "erro", /auto_drafts/.test(error.message) ? "Rode a migração 005_automacao.sql no Supabase." : error.message);
