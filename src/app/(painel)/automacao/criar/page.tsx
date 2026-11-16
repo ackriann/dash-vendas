@@ -6,8 +6,9 @@ import { listMedia } from "@/lib/automacao/media";
 import type { AccountLite, CatalogPrefs, MediaLite } from "@/lib/automacao/types";
 import Notice from "@/components/Notice";
 import SubmitButton from "@/components/SubmitButton";
-import { duplicateDraftAction, newDraftAction } from "../actions";
+import { duplicateDraftAction } from "../actions";
 import Wizard from "./Wizard";
+import AccountLaunchForm from "@/components/automacao/AccountLaunchForm";
 
 type SP = Promise<{ rascunho?: string; ok?: string; erro?: string }>;
 
@@ -33,16 +34,7 @@ export default async function Criar({ searchParams, embedded = false }: { search
         {!accounts.length ? (
           <p className="notice notice-warn">Nenhuma conta de anúncio nas conexões. Conecte em <Link className="underline" href="/perfis">Perfis Meta</Link>.</p>
         ) : (
-          <form action={newDraftAction} className="panel panel-pad flex flex-wrap gap-3 items-end max-w-2xl">
-            {embedded && <input type="hidden" name="surface" value="campanhas" />}
-            <label className="field flex-1 min-w-64">
-              <span className="label">Conta de anúncio</span>
-              <select className="select" name="account" defaultValue={accounts[0]?.id}>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.profile_name}{a.enabled ? "" : " (fora do painel)"}</option>)}
-              </select>
-            </label>
-            <SubmitButton className="btn btn-primary" pendingText="Abrindo…">Começar</SubmitButton>
-          </form>
+          <AccountLaunchForm accounts={accounts} embedded={embedded} />
         )}
         {drafts.length > 0 && (
           <section className="space-y-2">
