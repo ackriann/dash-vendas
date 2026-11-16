@@ -28,6 +28,7 @@ export default function AccountMultiPicker({
 }) {
   const id = useId();
   const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
@@ -73,14 +74,16 @@ export default function AccountMultiPicker({
   const primary = accounts.find((a) => a.id === primaryId);
   return (
     <div ref={wrap} className="relative min-w-0 space-y-2" onKeyDown={(event) => {
-      if (event.key === "Escape" && expanded) { event.stopPropagation(); setExpanded(false); }
+      if (event.key === "Escape" && expanded) {
+        event.stopPropagation(); setExpanded(false); trigger.current?.focus();
+      }
     }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label id={id + "-label"} className="label !mb-0">{label}</label>
         <span className="text-xs text-muted" aria-live="polite">{total} de {accounts.length} selecionada(s)</span>
       </div>
 
-      <button type="button" aria-haspopup="dialog" aria-expanded={expanded}
+      <button ref={trigger} type="button" aria-expanded={expanded}
         aria-controls={id + "-options"} aria-labelledby={id + "-label"}
         className="w-full text-left rounded-xl border border-line bg-[#0b202a] hover:border-[#5c97ad] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7cc8e6] px-4 py-3 flex items-center justify-between gap-3"
         onClick={() => setExpanded((v) => !v)}>
@@ -109,8 +112,8 @@ export default function AccountMultiPicker({
       )}
 
       {expanded && (
-        <div id={id + "-options"} role="dialog" aria-label="Selecionar contas de anúncios"
-          className="relative z-20 w-full rounded-xl border border-[#456675] bg-[#0c1c25] shadow-xl p-3 space-y-3">
+        <div id={id + "-options"} role="group" aria-label="Selecionar contas de anúncios"
+          className="relative z-30 w-full rounded-xl border border-[#456675] bg-[#0c1c25] shadow-xl p-3 space-y-3">
           <label className="field">
             <span className="sr-only">Pesquisar conta por nome, ID ou perfil</span>
             <input ref={search} type="search" className="input w-full"
@@ -177,7 +180,8 @@ export default function AccountMultiPicker({
             <p id={id + "-help"} className="text-xs text-muted">
               A conta principal define as configurações-base. Cada conta selecionada recebe sua própria campanha.
             </p>
-            <button type="button" className="btn btn-sm btn-primary shrink-0" onClick={() => setExpanded(false)}>Concluir</button>
+            <button type="button" className="btn btn-sm btn-primary shrink-0"
+              onClick={() => { setExpanded(false); trigger.current?.focus(); }}>Concluir</button>
           </div>
         </div>
       )}
