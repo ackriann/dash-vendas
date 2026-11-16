@@ -136,7 +136,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
         <p className="text-xs text-muted">O gasto com anúncios é o total das contas: a Meta não separa gasto por plataforma ou produto.</p>
       )}
 
-      <ProfitStrip revenue={s.revenue} fees={s.fees + s.adsFees + s.fixed} spend={s.spend} profit={s.profit}
+      <ProfitStrip revenue={s.revenue} fees={s.fees} spend={s.spend} profit={s.profit}
         currency={cur} variant="summary" periodLabel={range.label}
         hourlyChart={<SalesChart data={series} currency={cur} />} />
 
