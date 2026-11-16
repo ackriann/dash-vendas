@@ -265,9 +265,9 @@ function CampaignDrawer({
 }
 
 export default function SummaryCampaignClient({
-  rows, currency, timezone, range, backHref, startDetailId, syncedAt, partialErrors,
+  rows, currency, accountId, timezone, range, backHref, startDetailId, syncedAt, partialErrors,
 }: {
-  rows: AdRow[]; currency: string; timezone: string; range: DateRange;
+  rows: AdRow[]; currency: string; accountId?: string; timezone: string; range: DateRange;
   backHref: string; startDetailId?: string; syncedAt: string; partialErrors: string[];
 }) {
   const router = useRouter();
@@ -297,7 +297,7 @@ export default function SummaryCampaignClient({
     if (startDetailId) router.replace(backHref, { scroll: false });
   }, [backHref, router, startDetailId]);
   const createHref = `${backHref}${backHref.includes("?") ? "&" : "?"}painel=criar`;
-  const allHref = `/campanhas?level=campaign&range=${range.key}${range.key === "custom" ? `&since=${range.since}&until=${range.until}` : ""}&todos=1`;
+  const allHref = `/campanhas?level=campaign&range=${range.key}${range.key === "custom" ? `&since=${range.since}&until=${range.until}` : ""}${accountId ? `&conta=${encodeURIComponent(accountId)}` : ""}&todos=1`;
 
   return (
     <section className="panel panel-pad space-y-4" aria-label="Campanhas no Resumo">
