@@ -7,10 +7,7 @@ const ITEMS = [
   { href: "/dashes", label: "Dashes", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
   { href: "/vendas", label: "Vendas", icon: "M4 6h16M4 12h16M4 18h10" },
   { href: "/campanhas", label: "Campanhas", icon: "M4 15V9l12-5v16L4 15zm12-4h4" },
-  { href: "/automacao", label: "Automação", icon: "M4 6h10M4 12h7M4 18h10M17 4l3 3-3 3M14 15l3 3 3-3" },
-  { href: "/regras", label: "Regras", icon: "M13 3L4 14h7l-1 7 9-11h-7l1-7z" },
   { href: "/utms", label: "UTMs", icon: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" },
-  { href: "/paginas", label: "Páginas", icon: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3" },
   { href: "/taxas", label: "Taxas", icon: "M6 18L18 6M8 8.5a1.5 1.5 0 1 0 0-.01M16 16.5a1.5 1.5 0 1 0 0-.01" },
   { href: "/perfis", label: "Perfis Meta", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0" },
   { href: "/integracoes", label: "Integrações", icon: "M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0V7zM12 17v4" },
@@ -60,7 +57,7 @@ export default function Nav({ account }: { account: string }) {
         className="md:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-line bg-[#0c181d]/95 backdrop-blur"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        {ITEMS.filter((i) => ["/", "/vendas", "/campanhas", "/paginas", "/configuracoes"].includes(i.href)).map((i) => (
+        {ITEMS.filter((i) => ["/", "/vendas", "/campanhas", "/perfis", "/configuracoes"].includes(i.href)).map((i) => (
           <Link
             key={i.href}
             href={i.href}
