@@ -8,7 +8,6 @@ const TABS: [string, string][] = [
   ["/automacao/campanhas", "Campanhas publicadas"],
   ["/automacao/catalogos", "Catálogos"],
   ["/automacao/midias", "Mídias"],
-  ["/automacao/fanpages", "FanPages"],
   ["/automacao/processos", "Processos"],
 ];
 
