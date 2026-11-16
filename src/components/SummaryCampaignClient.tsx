@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { AdRow } from "@/lib/ads";
 import type { DateRange } from "@/lib/dates";
@@ -63,6 +63,7 @@ function CampaignDrawer({
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -72,6 +73,18 @@ function CampaignDrawer({
     closeButton.current?.focus();
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); close(); }
+      if (event.key !== "Tab" || !dialog.current) return;
+      const focusables = Array.from(dialog.current.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex='-1'])"
+      )).filter((element) => element.getClientRects().length > 0);
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
     };
     window.addEventListener("keydown", escape);
     return () => {
@@ -116,7 +129,7 @@ function CampaignDrawer({
   return (
     <div className="fixed inset-0 z-[95] flex justify-end" role="presentation">
       <div className="absolute inset-0 bg-black/65" onClick={close} aria-hidden="true" />
-      <section role="dialog" aria-modal="true" aria-label={`Detalhes da campanha ${readableLabel(row.name)}`}
+      <section ref={dialog} role="dialog" aria-modal="true" aria-label={`Detalhes da campanha ${readableLabel(row.name)}`}
         className="relative w-full sm:max-w-xl h-full overflow-y-auto bg-[#10242e] shadow-2xl border-l border-line">
         <header className="sticky top-0 z-10 bg-[#10242e] border-b border-line px-4 sm:px-6 py-4 flex items-start gap-3 justify-between">
           <div className="min-w-0">
@@ -279,10 +292,10 @@ export default function SummaryCampaignClient({
   const pageSize = show10 ? 10 : 5;
   const visible = list.slice(0, pageSize);
 
-  const close = () => {
+  const close = useCallback(() => {
     setSelected(null);
     if (startDetailId) router.replace(backHref, { scroll: false });
-  };
+  }, [backHref, router, startDetailId]);
   const createHref = `${backHref}${backHref.includes("?") ? "&" : "?"}painel=criar`;
   const allHref = `/campanhas?level=campaign&range=${range.key}${range.key === "custom" ? `&since=${range.since}&until=${range.until}` : ""}&todos=1`;
 
