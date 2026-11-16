@@ -59,9 +59,10 @@ export default function AccountMultiPicker({
 
   function setSelection(ids: string[]) {
     const valid = accounts.filter((a) => ids.includes(a.id)).map((a) => a.id);
+    // O formulário pai mantém a conta principal coerente quando a seleção muda.
+    // Não invocar onPrimaryChange aqui: essa ação é exclusiva do botão
+    // "Tornar principal" e poderia reintroduzir uma conta que foi desmarcada.
     onChange(valid);
-    if (valid.length && !valid.includes(primaryId)) onPrimaryChange(valid[0]);
-    if (!valid.length) onPrimaryChange("");
   }
 
   function toggle(id: string) {
