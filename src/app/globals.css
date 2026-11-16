@@ -24,6 +24,9 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Fundo do Resumo reproduzido da referência, sem afetar as demais páginas. */
+body:has(.summary-reference-layout) { background: #0b1216; }
 .num { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.015em; }
 h1 { font-size: 1.65rem; font-weight: 650; line-height: 1.15; }

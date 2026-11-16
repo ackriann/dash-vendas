@@ -42,7 +42,7 @@ function StatusMark({ row }: { row: AdRow }) {
   const labels = { active: "Veiculando", paused: "Pausada", issues: "Verificar" };
   const classes = {
     active: "text-[#8de0be] bg-[#15382f] border-[#255e47]",
-    paused: "text-[#afc6ca] bg-[#243b42] border-[#31515a]",
+    paused: "text-[#91a3ae] bg-[#1e2b31] border-transparent",
     issues: "text-[#f1bd91] bg-[#483223] border-[#78553a]",
   };
   return (
@@ -302,6 +302,7 @@ export default function SummaryCampaignClient({
   const [refreshing, startRefresh] = useTransition();
   const active = rows.filter((row) => tone(row) === "active").length;
   const issues = rows.filter((row) => tone(row) === "issues").length;
+  const paused = rows.filter((row) => tone(row) === "paused").length;
 
   const list = useMemo(() => {
     const needle = searchLabel(query.trim());
@@ -323,68 +324,46 @@ export default function SummaryCampaignClient({
   const allHref = `/campanhas?level=campaign&range=${range.key}${range.key === "custom" ? `&since=${range.since}&until=${range.until}` : ""}${accountId ? `&conta=${encodeURIComponent(accountId)}` : ""}&todos=1`;
 
   return (
-    <section className="panel panel-pad space-y-4" aria-label="Campanhas no Resumo">
+    <section className="rounded-[24px] border border-[#263139] bg-[#11191d] p-6 sm:p-7 space-y-5" aria-label="Campanhas no Resumo">
       <div className="flex flex-wrap items-center gap-3 justify-between">
         <div>
           <h2>Campanhas</h2>
           <p className="text-xs text-muted mt-1">Acompanhe e gerencie sem sair do Resumo · {range.label}</p>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
-          <button type="button" className="btn btn-sm" disabled={refreshing}
+          <button type="button" className="inline-flex items-center gap-2 rounded-full border border-[#2a363b] bg-[#0f171b] px-4 h-[38px] text-sm text-[#90a6ae] hover:text-white disabled:opacity-60" disabled={refreshing}
             onClick={() => startRefresh(() => router.refresh())}
             title="Sincronizar novamente com a Meta">
             {refreshing ? "Atualizando…" : "↻ Atualizar"}
           </button>
-          <Link className="btn btn-primary" href={createHref}>+ Criar campanha</Link>
+          <Link className="inline-flex items-center gap-2 rounded-full bg-[#3bd7a3] px-5 h-[38px] text-sm font-semibold text-[#071915] hover:bg-[#5de7b6]" href={createHref}>＋ Criar campanha</Link>
         </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
         <label className="relative block flex-1 max-w-lg">
           <span className="sr-only">Pesquisar campanha</span>
-          <input type="search" className="input w-full" value={query}
+          <input type="search" className="h-[46px] w-full rounded-full border border-[#1e3038] bg-[#0b1216] px-5 text-sm text-[#eaf0f2] placeholder:text-[#91a5af] focus:outline-[#5fa5bc]" value={query}
             onChange={(event) => { setQuery(event.target.value); setShow10(false); }}
             placeholder="Buscar campanha, ID ou conta…" />
         </label>
-        <div className="flex items-center gap-1 flex-wrap" aria-label="Filtrar por status">
+        <div className="flex items-center gap-1 flex-wrap rounded-full bg-[#1d272b] p-1" aria-label="Filtrar por status">
           {([
-            ["all", `Todas (${rows.length})`],
-            ["active", `Veiculando (${active})`],
-            ["paused", "Pausadas"],
-            ["issues", `Verificar (${issues})`],
+            ["all", `Todas ${rows.length}`],
+            ["active", `Ativas ${active}`],
+            ["paused", `Pausadas ${paused}`],
+            ...(issues ? [["issues", `Verificar ${issues}`] as const] : []),
           ] as const).map(([key, label]) => (
             <button type="button" key={key}
-              className={`btn btn-sm ${filter === key ? "btn-primary" : ""}`}
+              className={`rounded-full px-3.5 py-2 text-xs sm:text-sm whitespace-nowrap ${filter === key
+                ? "bg-[#f1f5f5] text-[#10191c] font-semibold"
+                : "text-[#8da3ad] hover:text-white"}`}
               aria-pressed={filter === key}
               onClick={() => { setFilter(key); setShow10(false); }}>{label}</button>
           ))}
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <details className="relative">
-          <summary className="btn btn-sm cursor-pointer">Personalizar colunas ({columns.length})</summary>
-          <div className="absolute right-0 top-full mt-2 z-30 panel p-3 w-52 shadow-xl space-y-2">
-            <p className="text-xs text-muted">Mostrar no quadro</p>
-            {COLUMN_OPTIONS.map((option) => (
-              <label key={option.id} className="flex items-center gap-2 cursor-pointer text-sm py-0.5">
-                <input type="checkbox" checked={columns.includes(option.id)}
-                  disabled={columns.length === 1 && columns.includes(option.id)}
-                  onChange={() => toggleColumn(option.id)} />
-                {option.label}
-              </label>
-            ))}
-            <button type="button" className="btn btn-sm w-full"
-              onClick={() => {
-                const all = COLUMN_OPTIONS.map((option) => option.id);
-                setColumns(all);
-                try { localStorage.setItem("resumo:campaign-columns", JSON.stringify(all)); } catch { /* opcional */ }
-              }}>
-              Restaurar padrão
-            </button>
-          </div>
-        </details>
-      </div>
 
       {partialErrors.length > 0 && (
         <div className="notice notice-warn text-sm" role="alert">
@@ -396,7 +375,7 @@ export default function SummaryCampaignClient({
       )}
 
       <div className="overflow-x-auto">
-        <table className="tbl w-full min-w-[560px]">
+        <table className="tbl w-full min-w-[560px] [&_th]:!px-0 [&_td]:!px-0 [&_th]:!py-3 [&_td]:!py-4 [&_th]:!text-[#91a6af]">
           <thead>
             <tr>
               <th>Campanha</th>
@@ -430,7 +409,7 @@ export default function SummaryCampaignClient({
                       <input type="hidden" name="account" value={row.accountId} />
                       <input type="hidden" name="next" value={isActive ? "PAUSED" : "ACTIVE"} />
                       <input type="hidden" name="back" value={backHref} />
-                      <SubmitButton className="btn btn-sm" pendingText="Enviando…"
+                      <SubmitButton className="rounded-full border border-[#24363c] bg-[#11191d] px-4 py-2 text-xs font-semibold text-white hover:border-[#46636d]" pendingText="Enviando…"
                         confirm={isActive
                           ? `Pausar a campanha "${readableLabel(row.name)}" na Meta?`
                           : `Ativar a campanha "${readableLabel(row.name)}" na Meta? Confirme o orçamento e a veiculação antes.`}>
@@ -453,20 +432,48 @@ export default function SummaryCampaignClient({
       <div className="flex flex-wrap justify-between items-center gap-2 pt-1">
         <div className="text-xs text-muted">
           {list.length ? `Exibindo ${visible.length} de ${list.length} campanha(s)` : "Nenhuma campanha"}
-          {" · "}Sincronização: {syncedAt} ({timezone})
+          <span className="sr-only"> · Sincronização: {syncedAt} ({timezone})</span>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <details className="relative">
+            <summary className="rounded-full border border-[#25343b] px-3 py-2 text-xs text-[#91a6af] cursor-pointer">Colunas</summary>
+            <div className="absolute right-0 bottom-full mb-2 z-30 rounded-xl border border-[#263139] bg-[#101a1e] p-3 w-52 shadow-xl space-y-2">
+              <p className="text-xs text-muted">Personalizar colunas</p>
+              {COLUMN_OPTIONS.map((option) => (
+                <label key={option.id} className="flex items-center gap-2 cursor-pointer text-sm py-0.5">
+                  <input type="checkbox" checked={columns.includes(option.id)}
+                    disabled={columns.length === 1 && columns.includes(option.id)}
+                    onChange={() => toggleColumn(option.id)} />
+                  {option.label}
+                </label>
+              ))}
+              <button type="button" className="btn btn-sm w-full"
+                onClick={() => {
+                  const all = COLUMN_OPTIONS.map((option) => option.id);
+                  setColumns(all);
+                  try { localStorage.setItem("resumo:campaign-columns", JSON.stringify(all)); } catch { /* opcional */ }
+                }}>Restaurar padrão</button>
+            </div>
+          </details>
           {!show10 && list.length > 5 && (
             <button type="button" className="btn btn-sm"
               onClick={() => setShow10(true)}>Mostrar até 10</button>
           )}
-          <Link className="btn btn-sm" href={allHref}>Ver todas as campanhas →</Link>
+          <Link className="inline-flex items-center rounded-full border border-[#25343b] px-4 py-2 text-sm text-[#91a6af] hover:text-white" href={allHref}>Ver todas →</Link>
         </div>
       </div>
-      <p className="text-xs text-muted">
-        Gastos: Meta Marketing API; vendas e ROAS: vendas confirmadas por campanhas rastreadas.
-        Os filtros de plataforma/produto do Resumo não alteram este quadro, que usa período e contas.
-        Clique no nome para ver métricas, conjuntos, anúncios e editar.
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#24343b] pt-4">
+        <p className="text-xs sm:text-sm text-[#91a6af]">
+          Verifique as métricas completas em{" "}
+          <Link href={allHref} className="font-semibold text-[#3bd7a3] hover:underline">Campanhas →</Link>
+        </p>
+        <span className="text-[11px] text-[#758e98]" title={`Última sincronização com a Meta: ${syncedAt} (${timezone})`}>
+          Dados da Meta · {range.label}
+        </span>
+      </div>
+      <p className="sr-only">
+        Gastos vindos da Meta Marketing API; vendas e ROAS calculados pelas vendas confirmadas e rastreadas.
+        Os filtros de plataforma e produto do Resumo não alteram este quadro. Clique no nome para ver detalhes e editar.
       </p>
 
       {selected && <CampaignDrawer key={selected.id} row={selected}
