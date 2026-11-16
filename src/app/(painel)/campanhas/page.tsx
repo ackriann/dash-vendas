@@ -134,6 +134,9 @@ export default async function Campanhas({ searchParams }: { searchParams: SP }) 
       </div>
 
       <Notice ok={sp.ok} erro={sp.erro} />
+      {errors.length > 0 && <p className="notice notice-warn">
+        Alguns dados da Meta não puderam ser carregados. Os totais abaixo são parciais e não devem ser usados como fechamento.
+      </p>}
       {errors.map((e) => <p key={e} className="notice notice-err">Meta — {e}</p>)}
 
       <div className="flex flex-wrap items-center gap-2">
