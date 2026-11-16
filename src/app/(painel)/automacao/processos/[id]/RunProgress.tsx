@@ -79,6 +79,17 @@ export default function RunProgress({ initial, back, hasPendingVideos = false, i
           </div>
           <RunPill status={run.status} />
         </div>
+        {run.kind === "publish" && (
+          <p className="text-sm font-medium">
+            {run.status === "running" || run.status === "queued"
+              ? "Vinculando campanha ao Facebook · verificando cada etapa da publicação"
+              : run.status === "failed"
+                ? "Falha na vinculação · confira a etapa destacada e a resposta da Meta"
+                : run.status === "done"
+                  ? "Publicação concluída · consulte a veiculação e a revisão na Meta"
+                  : "Publicação interrompida"}
+          </p>
+        )}
         <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${pct}%` }} /></div>
         <p className="text-sm text-muted">
           {done} de {total} operações concluídas{waiting ? ` · ${waiting} aguardando a Meta` : ""}{failed.length ? ` · ${failed.length} com falha` : ""}

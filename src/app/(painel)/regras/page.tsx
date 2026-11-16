@@ -19,7 +19,7 @@ const TEMPLATES = [
   "Reativar ontem lucrativo (período Ontem, Lucro > 0 → Ativar)",
 ];
 
-export default async function Regras({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
+export default async function Regras({ searchParams, embedded = false }: { searchParams: Promise<{ ok?: string; erro?: string }>; embedded?: boolean }) {
   const sp = await searchParams;
   let loadError: string | null = null;
   const [rules, accounts, cronKey, base] = await Promise.all([
@@ -69,16 +69,16 @@ export default async function Regras({ searchParams }: { searchParams: Promise<{
               {r.last_run_at && <li>Última execução {fmtDateTime(r.last_run_at, env.timezone)}: <span className="text-ink">{r.last_result}</span></li>}
             </ul>
             <div className="flex gap-1 flex-wrap">
-              <form action={runRuleNow}><input type="hidden" name="id" value={r.id} /><input type="hidden" name="dry" value="1" /><SubmitButton className="btn btn-sm" pendingText="…">Simular</SubmitButton></form>
-              <form action={runRuleNow}><input type="hidden" name="id" value={r.id} /><SubmitButton className="btn btn-sm" pendingText="…" confirm="Executar agora? As mudanças vão para a Meta.">Executar</SubmitButton></form>
-              <form action={toggleRule}><input type="hidden" name="id" value={r.id} /><input type="hidden" name="active" value={String(!r.active)} /><SubmitButton className={`btn btn-sm ${r.active ? "" : "btn-primary"}`} pendingText="…">{r.active ? "Desligar" : "Ligar"}</SubmitButton></form>
-              <form action={deleteRule} className="ml-auto"><input type="hidden" name="id" value={r.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover a regra ${r.name}?`}>Remover</SubmitButton></form>
+              <form action={runRuleNow}>{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={r.id} /><input type="hidden" name="dry" value="1" /><SubmitButton className="btn btn-sm" pendingText="…">Simular</SubmitButton></form>
+              <form action={runRuleNow}>{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={r.id} /><SubmitButton className="btn btn-sm" pendingText="…" confirm="Executar agora? As mudanças vão para a Meta.">Executar</SubmitButton></form>
+              <form action={toggleRule}>{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={r.id} /><input type="hidden" name="active" value={String(!r.active)} /><SubmitButton className={`btn btn-sm ${r.active ? "" : "btn-primary"}`} pendingText="…">{r.active ? "Desligar" : "Ligar"}</SubmitButton></form>
+              <form action={deleteRule} className="ml-auto">{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={r.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover a regra ${r.name}?`}>Remover</SubmitButton></form>
             </div>
           </Acc>
         ))}
 
         <Acc title="Nova regra" sub="Condições + ação" open={!rules.length && !loadError}>
-          <form action={createRule} className="space-y-4">
+          <form action={createRule} className="space-y-4">{embedded && <input type="hidden" name="surface" value="campanhas" />}
             <div className="grid sm:grid-cols-3 gap-3">
               <label className="field sm:col-span-3"><span className="label">Nome</span><input className="input" name="name" required placeholder="Pausar anúncio sem venda" /></label>
               <label className="field"><span className="label">Aplicar em</span>
@@ -160,7 +160,7 @@ export default async function Regras({ searchParams }: { searchParams: Promise<{
               <CopyButton text={cronUrl} />
             </div>
           )}
-          <form action={newCronKey}>
+          <form action={newCronKey}>{embedded && <input type="hidden" name="surface" value="campanhas" />}
             <SubmitButton className={cronKey ? "btn btn-sm" : "btn btn-primary"} pendingText="…" confirm={cronKey ? "Gerar nova chave? A URL antiga para de funcionar." : undefined}>
               {cronKey ? "Gerar nova chave" : "Gerar chave"}
             </SubmitButton>

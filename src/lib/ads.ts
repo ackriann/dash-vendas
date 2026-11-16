@@ -175,7 +175,9 @@ export function metric(r: AdRow, k: MetricKey): number | null {
     case "cpm": return r.impressions ? (r.spend / r.impressions) * 1000 : null;
     case "convLpvIc": return r.lpv ? (r.ic / r.lpv) * 100 : null;
     case "convIcSale": return r.ic ? (r.sales / r.ic) * 100 : null;
-    case "frequency": return r.reach ? r.impressions / r.reach : null;
+    // Alcance agregado entre campanhas pode repetir as mesmas pessoas.
+    // Sem consulta específica na Meta no nível correto, não inventar frequência total.
+    case "frequency": return r.level === "account" || r.id === "total" ? null : r.reach ? r.impressions / r.reach : null;
     case "hook": return r.impressions ? (r.video3s / r.impressions) * 100 : null;
     default: return r[k];
   }

@@ -49,7 +49,7 @@ async function api<T>(op: string, account: string, extra: Record<string, string>
 const label = (list: [string, string][], v: string) => list.find(([k]) => k === v)?.[1] ?? v;
 
 export default function Wizard({
-  draftId, initial, initialStep, accounts, pages, pagesFromSync, media: initialMedia, catalogPrefs = {},
+  draftId, initial, initialStep, accounts, pages, pagesFromSync, media: initialMedia, catalogPrefs = {}, embedded = false,
 }: {
   draftId: string;
   initial: DraftData;
@@ -59,6 +59,7 @@ export default function Wizard({
   pagesFromSync: boolean;
   media: MediaLite[];
   catalogPrefs?: CatalogPrefs;
+  embedded?: boolean;
 }) {
   const router = useRouter();
   const [d, setD] = useState<DraftData>(initial);
@@ -269,7 +270,9 @@ export default function Wizard({
     setServerErrors([]);
     const r: { runId?: string; runIds?: string[]; errors?: string[] } = await publishDraftAction(draftId, d).catch((e) => ({ errors: [String(e?.message ?? e)] }));
     if (r.runId) {
-      router.push((r.runIds?.length ?? 1) > 1 ? "/automacao/processos" : `/automacao/processos/${r.runId}`);
+      router.push(embedded
+        ? (r.runIds?.length ?? 1) > 1 ? "/campanhas?painel=status" : `/campanhas?painel=status&processo=${r.runId}`
+        : (r.runIds?.length ?? 1) > 1 ? "/automacao/processos" : `/automacao/processos/${r.runId}`);
       return;
     }
     setServerErrors(r.errors ?? ["Falha ao publicar."]);
@@ -917,7 +920,7 @@ function StepNav({ step, setStep }: { step: number; setStep: (n: number) => void
   return (
     <div className="flex justify-between gap-2 pt-1">
       <button type="button" className="btn" disabled={step === 1} onClick={() => setStep(step - 1)}>← Voltar</button>
-      <button type="button" className="btn btn-primary" onClick={() => { setStep(step + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+      <button type="button" className="btn btn-primary" onClick={() => { setStep(step + 1); const scroller = document.querySelector("[data-campaign-dialog-scroll]"); if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" }); else window.scrollTo({ top: 0, behavior: "smooth" }); }}>
         {step === 3 ? "Revisar" : "Continuar"} →
       </button>
     </div>
