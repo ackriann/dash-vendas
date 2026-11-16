@@ -11,7 +11,7 @@ import Wizard from "./Wizard";
 
 type SP = Promise<{ rascunho?: string; ok?: string; erro?: string }>;
 
-export default async function Criar({ searchParams }: { searchParams: SP }) {
+export default async function Criar({ searchParams, embedded = false }: { searchParams: SP; embedded?: boolean }) {
   const sp = await searchParams;
   const [profiles, accountsRaw] = await Promise.all([listProfiles().catch(() => []), listAccounts().catch(() => [])]);
   const accounts: AccountLite[] = accountsRaw
@@ -34,6 +34,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
           <p className="notice notice-warn">Nenhuma conta de anúncio nas conexões. Conecte em <Link className="underline" href="/perfis">Perfis Meta</Link>.</p>
         ) : (
           <form action={newDraftAction} className="panel panel-pad flex flex-wrap gap-3 items-end max-w-2xl">
+            {embedded && <input type="hidden" name="surface" value="campanhas" />}
             <label className="field flex-1 min-w-64">
               <span className="label">Conta de anúncio</span>
               <select className="select" name="account" defaultValue={accounts[0]?.id}>
@@ -49,7 +50,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
             <div className="grid gap-2">
               {drafts.map((d) => (
                 <div key={d.id} className="panel px-4 py-3 flex items-center gap-3">
-                  <Link href={`/automacao/criar?rascunho=${d.id}`} className="flex-1 min-w-0 hover:underline font-semibold truncate">{d.name}</Link>
+                  <Link href={embedded ? `/campanhas?painel=criar&rascunho=${d.id}` : `/automacao/criar?rascunho=${d.id}`} className="flex-1 min-w-0 hover:underline font-semibold truncate">{d.name}</Link>
                   <span className={`pill ${d.status === "failed" ? "pill-refunded" : ""}`}>{d.status === "failed" ? "Falhou" : `Etapa ${d.step}`}</span>
                 </div>
               ))}
@@ -74,7 +75,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
         <div className="flex gap-2">
           {draft.run_id && <Link className="btn btn-primary" href={`/automacao/processos/${draft.run_id}`}>Ver processo</Link>}
           {draft.data.extraAccountIds.length > 0 && <Link className="btn" href="/automacao/processos">Processos de todas as contas</Link>}
-          <form action={duplicateDraftAction}><input type="hidden" name="id" value={draft.id} /><SubmitButton className="btn" pendingText="…">Duplicar rascunho</SubmitButton></form>
+          <form action={duplicateDraftAction}>{embedded && <input type="hidden" name="surface" value="campanhas" />}<input type="hidden" name="id" value={draft.id} /><SubmitButton className="btn" pendingText="…">Duplicar rascunho</SubmitButton></form>
         </div>
       </div>
     );
@@ -102,6 +103,7 @@ export default async function Criar({ searchParams }: { searchParams: SP }) {
         pagesFromSync={pagesFromSync}
         media={media}
         catalogPrefs={catalogPrefs}
+        embedded={embedded}
       />
     </div>
   );
