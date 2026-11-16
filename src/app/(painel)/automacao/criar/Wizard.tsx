@@ -920,7 +920,7 @@ function StepNav({ step, setStep }: { step: number; setStep: (n: number) => void
   return (
     <div className="flex justify-between gap-2 pt-1">
       <button type="button" className="btn" disabled={step === 1} onClick={() => setStep(step - 1)}>← Voltar</button>
-      <button type="button" className="btn btn-primary" onClick={() => { setStep(step + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+      <button type="button" className="btn btn-primary" onClick={() => { setStep(step + 1); const scroller = document.querySelector("[data-campaign-dialog-scroll]"); if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" }); else window.scrollTo({ top: 0, behavior: "smooth" }); }}>
         {step === 3 ? "Revisar" : "Continuar"} →
       </button>
     </div>
