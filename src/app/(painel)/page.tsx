@@ -6,13 +6,14 @@ import CampaignModal from "@/components/CampaignModal";
 import CampaignStatusList from "@/components/CampaignStatusList";
 import Criar from "@/app/(painel)/automacao/criar/page";
 import Processo from "@/app/(painel)/automacao/processos/[id]/page";
-import { hourInTz, resolveRange } from "@/lib/dates";
+import { resolveRange } from "@/lib/dates";
 import { fmtMoney, fmtNum, fmtPct } from "@/lib/money";
 import { listObjects } from "@/lib/meta";
 import { chartSeries, getContext, groupBy, loadSales, loadSpend, summarize, type SaleLite } from "@/lib/report";
 import { PAYMENT_LABEL, paymentKind, platformLabel, type PaymentKind } from "@/lib/sales";
 import { nameFromUtm } from "@/lib/utm";
 import RangeFilter from "@/components/RangeFilter";
+import SummaryQuickFilters from "@/components/SummaryQuickFilters";
 import ProfitStrip from "@/components/ProfitStrip";
 import SalesChart from "@/components/SalesChart";
 import DashBar from "@/components/DashBar";
@@ -63,7 +64,6 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
     .map(([name, list]) => ({ name, count: list.length, value: sum(list) }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
-  const tracked = approved.filter((x) => x.campaign_id).length;
 
   // Vendas por forma de pagamento, com taxa de aprovação (aprovadas ÷ geradas)
   const paid = (x: SaleLite) => ["approved", "refunded", "chargeback"].includes(x.status);
@@ -74,10 +74,6 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
       return { k, total: list.length, count: ok.length, value: sum(ok), rate: list.length ? (list.filter(paid).length / list.length) * 100 : null };
     })
     .filter((p) => p.total > 0);
-
-  const hours = Array(24).fill(0) as number[];
-  for (const x of approved) hours[hourInTz(x.created_at, ctx.tz)]++;
-  const maxHour = Math.max(...hours, 1);
 
   const allPaid = sales.filter(paid).length;
   const refundRate = allPaid ? (s.refunded / allPaid) * 100 : null;
@@ -103,36 +99,18 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
   const panel = sp.painel === "criar" || sp.painel === "status" ? sp.painel : null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <DashBar dashes={dashes} active={ctx.dash} path="/" />
-      <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-        <div>
-          <h1>{ctx.dash ? ctx.dash.name : "Resumo"}</h1>
-          <p className="sub">{range.label}</p>
-        </div>
-        <RangeFilter range={range} path="/" keep={keep} />
+      <header className="space-y-6">
+        <h1 className="!text-[32px] !font-bold !tracking-tight">{ctx.dash ? ctx.dash.name : "Resumo"}</h1>
+        <RangeFilter range={range} path="/" keep={keep} variant="summary" />
       </header>
 
-      <form method="get" action="/" className="flex flex-wrap gap-2 items-center">
-        <input type="hidden" name="range" value={range.key} />
-        {range.key === "custom" && (<><input type="hidden" name="since" value={range.since} /><input type="hidden" name="until" value={range.until} /></>)}
-        {ctx.accounts.length > 1 && (
-          <select className="select !h-[30px] !w-auto max-w-56 text-sm" name="conta" defaultValue={sp.conta ?? ""} aria-label="Conta de anúncio">
-            <option value="">Todas as contas</option>
-            {ctx.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        )}
-        <select className="select !h-[30px] !w-auto text-sm" name="plataforma" defaultValue={sp.plataforma ?? ""} aria-label="Plataforma">
-          <option value="">Todas as plataformas</option>
-          {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
-        </select>
-        <select className="select !h-[30px] !w-auto max-w-56 text-sm" name="produto" defaultValue={sp.produto ?? ""} aria-label="Produto">
-          <option value="">Todos os produtos</option>
-          {products.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <button className="btn btn-sm">Filtrar</button>
-        {(sp.conta || filtered) && <Link className="btn btn-sm" href={`/?${rangeQs}`}>Limpar</Link>}
-      </form>
+      <SummaryQuickFilters range={range.key} since={range.since} until={range.until}
+        account={sp.conta} platform={sp.plataforma} product={sp.produto}
+        accounts={ctx.accounts.map((a) => ({ id: a.id, label: a.name }))}
+        platforms={platforms.map((p) => ({ id: p, label: platformLabel(p) }))}
+        products={products.map((p) => ({ id: p, label: p }))} />
 
       <Notice ok={sp.ok} erro={sp.erro} />
 
@@ -158,23 +136,20 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
         <p className="text-xs text-muted">O gasto com anúncios é o total das contas: a Meta não separa gasto por plataforma ou produto.</p>
       )}
 
-      <section className="panel panel-pad">
-        <ProfitStrip revenue={s.revenue} fees={s.fees} spend={s.spend} profit={s.profit} currency={cur} />
-      </section>
+      <ProfitStrip revenue={s.revenue} fees={s.fees + s.adsFees + s.fixed} spend={s.spend} profit={s.profit}
+        currency={cur} variant="summary" periodLabel={range.label}
+        hourlyChart={<SalesChart data={series} currency={cur} />} />
 
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Indicadores do Resumo">
         <Stat label="Faturamento líquido" value={fmtMoney(net, cur)} hint={`bruto ${fmtMoney(s.revenue, cur)}`} />
-        <Stat label="Gastos com anúncios" value={fmtMoney(s.spend, cur)} hint={s.adsFees ? `+ ${fmtMoney(s.adsFees, cur)} de impostos` : undefined} tone="spend" />
+        <Stat label="Margem" value={fmtPct(s.margin)} tone={s.profit < 0 && s.revenue > 0 ? "loss" : undefined} />
         <Stat label="ROAS" value={s.roas ? `${fmtNum(s.roas, 2)}x` : "—"} hint={`ROI ${fmtPct(s.roi)}`} />
-        <Stat label="Margem" value={fmtPct(s.margin)} hint={`lucro ${fmtMoney(s.profit, cur)}`} tone={s.profit < 0 ? "loss" : undefined} />
+        <Stat label="CPA" value={s.cpa ? fmtMoney(s.cpa, cur) : "—"} />
+        <Stat label="Ticket médio" value={s.ticket ? fmtMoney(s.ticket, cur) : "—"} />
         <Stat label="Vendas aprovadas" value={fmtNum(s.approved)} hint={`${fmtNum(customers)} cliente(s)`} />
-        <Stat label="CPA" value={s.cpa ? fmtMoney(s.cpa, cur) : "—"} hint="gasto ÷ vendas" />
-        <Stat label="Ticket médio" value={s.ticket ? fmtMoney(s.ticket, cur) : "—"} hint={customers ? `ARPU ${fmtMoney(s.revenue / customers, cur)}` : undefined} />
-        <Stat label="Vendas pendentes" value={fmtNum(s.pending)} hint={fmtMoney(s.pendingValue, cur)} />
-        <Stat label="Reembolsos" value={fmtNum(s.refunded)} hint={`taxa ${fmtPct(refundRate)}`} tone={s.refunded ? "loss" : undefined} />
-        <Stat label="Chargebacks" value={fmtNum(s.chargebacks)} hint={`taxa ${fmtPct(cbRate)} · ${fmtMoney(s.refundedValue, cur)} devolvidos`} tone={s.chargebacks ? "loss" : undefined} />
-        <Stat label="Taxas e impostos" value={fmtMoney(s.saleFees + s.adsFees, cur)} hint={s.fixed ? `+ ${fmtMoney(s.fixed, cur)} custos fixos` : "das vendas e dos anúncios"} />
-        <Stat label="Vendas rastreadas" value={s.approved ? fmtPct((tracked / s.approved) * 100, 0) : "—"} hint="com campanha identificada" />
+        <Stat label="Pendentes" value={fmtNum(s.pending)} hint={s.pending ? fmtMoney(s.pendingValue, cur) : undefined} />
+        <Stat label="Reembolsos" value={fmtNum(s.refunded)} hint={s.refunded ? `taxa ${fmtPct(refundRate)}` : undefined} />
+        <Stat label="Chargebacks" value={fmtNum(s.chargebacks)} hint={s.chargebacks ? `taxa ${fmtPct(cbRate)}` : undefined} />
       </section>
 
       <Suspense fallback={
@@ -189,21 +164,9 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
           backHref={summaryHref} startDetailId={sp.detalhe} />
       </Suspense>
 
-      <section className="panel panel-pad">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2>{range.days === 1 ? "Por hora" : "Por dia"}</h2>
-          <div className="flex gap-4 text-xs text-muted">
-            <span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-info" />Faturamento</span>
-            <span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-spend" />Anúncios</span>
-            <span className="flex items-center gap-1.5"><i className="h-0.5 w-3 bg-profit" />Lucro</span>
-          </div>
-        </div>
-        <SalesChart data={series} currency={cur} />
-      </section>
-
-      <section className="grid md:grid-cols-2 gap-3">
-        <div className="panel panel-pad">
-          <h2 className="mb-3">Formas de pagamento</h2>
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-[24px] border border-[#263139] bg-[#11191d] p-6 min-h-[196px]">
+          <h2 className="mb-3 text-[16px] font-semibold">Formas de pagamento</h2>
           {byPayment.length ? (
             <table className="tbl">
               <thead><tr><th>Forma</th><th className="r">Aprovadas</th><th className="r">Valor</th><th className="r">Aprovação</th></tr></thead>
@@ -219,29 +182,18 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
               </tbody>
             </table>
           ) : (
-            <p className="sub">Sem vendas no período.</p>
+            <EmptySummary icon="card" message="Sem vendas no período." />
           )}
-          <p className="text-xs text-muted mt-2">Aprovação = vendas pagas ÷ vendas geradas (inclui pix/boleto não pagos e cartões recusados).</p>
+          {byPayment.length > 0 && <p className="text-xs text-muted mt-2">Aprovação = vendas pagas ÷ vendas geradas (inclui pix/boleto não pagos e cartões recusados).</p>}
         </div>
 
-        <div className="panel panel-pad">
-          <h2 className="mb-3">Horários das vendas</h2>
-          <div className="flex items-end gap-[3px] h-28" role="img" aria-label="Vendas aprovadas por hora do dia">
-            {hours.map((n, h) => (
-              <div key={h} className="flex-1 flex flex-col items-center justify-end h-full" title={`${String(h).padStart(2, "0")}h: ${n} venda(s)`}>
-                <div className="w-full rounded-t bg-info/80" style={{ height: `${(n / maxHour) * 100}%`, minHeight: n ? 3 : 0 }} />
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-between text-[0.7rem] text-muted mt-1"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span></div>
-        </div>
+        <Bars title="Produtos" items={byProduct} cur={cur} empty="Nenhuma venda aprovada no período." emptyIcon="package" />
       </section>
 
-      <section className="grid md:grid-cols-3 gap-3">
-        <Bars title="Produtos" items={byProduct} cur={cur} empty="Nenhuma venda aprovada no período." />
-        <Bars title="Origem (utm_source)" items={bySource} cur={cur} empty="Sem vendas com origem." />
-        <div className="panel panel-pad">
-          <h2 className="mb-3">Plataformas</h2>
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Bars title="Origem (utm_source)" items={bySource} cur={cur} empty="Sem vendas com origem." emptyIcon="globe" />
+        <div className="rounded-[24px] border border-[#263139] bg-[#11191d] p-6 min-h-[196px]">
+          <h2 className="mb-3 text-[16px] font-semibold">Plataformas</h2>
           {byPlatform.length ? (
             <table className="tbl">
               <tbody>
@@ -255,9 +207,9 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
               </tbody>
             </table>
           ) : (
-            <p className="sub">As vendas aparecem aqui assim que o primeiro webhook chegar.</p>
+            <EmptySummary icon="plug" message="Aparecem assim que o primeiro webhook chegar." />
           )}
-          <Link href={`/campanhas?${rangeQs}`} className="btn btn-sm mt-4">Ver resultado por campanha</Link>
+          <Link href={`/campanhas?${rangeQs}`} className="inline-flex items-center justify-center w-full mt-3 text-sm font-semibold text-[#39d9a3] hover:underline">Ver resultado por campanha →</Link>
         </div>
       </section>
       {panel && (
@@ -276,10 +228,15 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
   );
 }
 
-function Bars({ title, items, cur, empty }: { title: string; items: { name: string; count: number; value: number }[]; cur: string; empty: string }) {
+function Bars({ title, items, cur, empty, emptyIcon = "package" }: {
+  title: string;
+  items: { name: string; count: number; value: number }[];
+  cur: string; empty: string;
+  emptyIcon?: "card" | "package" | "globe" | "plug";
+}) {
   return (
-    <div className="panel panel-pad">
-      <h2 className="mb-3">{title}</h2>
+    <div className="rounded-[24px] border border-[#263139] bg-[#11191d] p-6 min-h-[196px]">
+      <h2 className="mb-3 text-[16px] font-semibold">{title}</h2>
       {items.length ? (
         <ul className="space-y-2.5">
           {items.map((p) => (
@@ -295,7 +252,7 @@ function Bars({ title, items, cur, empty }: { title: string; items: { name: stri
           ))}
         </ul>
       ) : (
-        <p className="sub">{empty}</p>
+        <EmptySummary icon={emptyIcon} message={empty} />
       )}
     </div>
   );
@@ -303,10 +260,27 @@ function Bars({ title, items, cur, empty }: { title: string; items: { name: stri
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "spend" | "loss" }) {
   return (
-    <div className="panel px-4 py-3.5">
-      <p className="sub">{label}</p>
-      <p className={`num text-xl md:text-2xl font-semibold mt-0.5 ${tone === "spend" ? "text-spend" : tone === "loss" ? "neg" : ""}`}>{value}</p>
-      {hint && <p className="text-xs text-muted mt-0.5">{hint}</p>}
+    <div className="rounded-[24px] border border-[#263139] bg-[#11191d] p-[22px] min-h-[123px]">
+      <p className="text-sm text-[#91a8b2]">{label}</p>
+      <p className={`num mt-1.5 text-[24px] font-semibold leading-tight ${tone === "spend" ? "text-spend" : tone === "loss" ? "neg" : ""}`}>{value}</p>
+      {hint && <p className="text-xs text-[#8298a0] mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+function EmptySummary({ icon, message }: { icon: "card" | "package" | "globe" | "plug"; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 min-h-[126px] text-center">
+      <span className="grid place-items-center h-11 w-11 rounded-full bg-[#1d282e] text-[#8799a1]">
+        <svg width="21" height="21" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {icon === "card" && <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></>}
+          {icon === "package" && <><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="M3 8v9l9 5 9-5V8M12 13v9"/></>}
+          {icon === "globe" && <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9M12 3c-3 3-4 6-4 9s1 6 4 9"/></>}
+          {icon === "plug" && <><path d="M8 3v5M16 3v5M6 8h12v4a6 6 0 0 1-12 0V8ZM12 18v3"/></>}
+        </svg>
+      </span>
+      <p className="text-sm text-[#91a8b2] max-w-[250px]">{message}</p>
     </div>
   );
 }
