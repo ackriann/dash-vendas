@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import MediaUploader from "@/components/automacao/MediaUploader";
 import AccountMultiPicker from "@/components/automacao/AccountMultiPicker";
+import { readableLabel } from "@/lib/readable-label";
 import {
   BID_STRATEGIES, CATALOG_DEFAULT_DESCRIPTION, CATALOG_DEFAULT_HEADLINE, CATALOG_FORMATS, CTAS, EVENTS, FB_POSITIONS, GOALS, IG_POSITIONS, NEEDS_PIXEL, OBJECTIVES, PLATFORMS,
   RECOMMENDED_URL_TAGS, STEP_LABELS, adsetGroupsFor, adsPerGroup, draftStructure, needsBidAmount, validateDraft,
@@ -304,9 +305,9 @@ export default function Wizard({
         ? d.campaign.budget
         : adsetGroupsFor(d).reduce((sum, g) => sum + (Number(g.settings.budget) || 0), 0);
       if (!window.confirm(
-        `CONFIRMAR PUBLICAÇÃO EM ${numberOfAccounts} CONTAS\\n\\n` +
-        `Será criada uma campanha separada em cada conta selecionada.\\n` +
-        `Orçamento configurado por conta: ${account?.currency ?? "moeda da conta"} ${Number(budget ?? 0).toFixed(2)}.\\n` +
+        `CONFIRMAR PUBLICAÇÃO EM ${numberOfAccounts} CONTAS\n\n` +
+        `Será criada uma campanha separada em cada conta selecionada.\n` +
+        `Orçamento configurado por conta: ${account?.currency ?? "moeda da conta"} ${Number(budget ?? 0).toFixed(2)}.\n` +
         "Confirme que revisou as contas, orçamentos e permissões."
       )) return;
     }
@@ -334,7 +335,7 @@ export default function Wizard({
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div className="min-w-0">
           <h1 className="truncate">{d.campaign.name || "Nova campanha"}</h1>
-          <p className="sub">{account ? `${account.name} · ${account.profile_name}` : "Escolha a conta"} · <SaveState s={save} /></p>
+          <p className="sub">{account ? `${readableLabel(account.name)} · ${readableLabel(account.profile_name)}` : "Escolha a conta"} · <SaveState s={save} /></p>
         </div>
         <button type="button" className="btn" onClick={doSave} disabled={save.state === "saving"}>Salvar rascunho</button>
       </header>
