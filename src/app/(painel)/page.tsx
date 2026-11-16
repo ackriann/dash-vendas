@@ -185,7 +185,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
           <div className="h-36 bg-surface-2 animate-pulse rounded-xl" />
         </section>
       }>
-        <SummaryCampaignSlot ctx={ctx} range={range} accountId={sp.conta}
+        <SummaryCampaignSlot ctx={ctx} range={range} accountId={sp.conta} sales={allSales}
           backHref={summaryHref} startDetailId={sp.detalhe} />
       </Suspense>
 
