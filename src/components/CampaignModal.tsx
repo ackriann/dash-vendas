@@ -39,7 +39,7 @@ export default function CampaignModal({
           <Link ref={closeRef} href={closeHref} className="btn btn-sm"
             aria-label="Fechar janela e voltar às campanhas">Fechar ×</Link>
         </header>
-        <div className="overflow-y-auto overscroll-contain flex-1 p-4 sm:p-6">
+        <div data-campaign-dialog-scroll className="overflow-y-auto overscroll-contain flex-1 p-4 sm:p-6">
           {children}
         </div>
       </section>
