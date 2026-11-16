@@ -99,7 +99,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
   const panel = sp.painel === "criar" || sp.painel === "status" ? sp.painel : null;
 
   return (
-    <div className="space-y-6">
+    <div className="summary-reference-layout space-y-8">
       <DashBar dashes={dashes} active={ctx.dash} path="/" />
       <header className="space-y-6">
         <h1 className="!text-[32px] !font-bold !tracking-tight">{ctx.dash ? ctx.dash.name : "Resumo"}</h1>
