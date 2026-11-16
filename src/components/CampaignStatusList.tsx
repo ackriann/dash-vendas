@@ -3,6 +3,7 @@ import { listRuns, jobCounts } from "@/lib/automacao/engine";
 import { fmtDateTime } from "@/lib/dates";
 import { env } from "@/lib/env";
 import { RunPill } from "@/components/automacao/JobStatus";
+import CampaignStatusRefresh from "./CampaignStatusRefresh";
 
 /** Processos de publicações, separados das operações técnicas e do histórico
  * individual de vídeos. A consulta acontece no workspace autenticado.
@@ -24,7 +25,8 @@ export default async function CampaignStatusList({
             Cada campanha possui um processo. Abra para verificar todas as etapas e erros da Meta.
           </p>
         </div>
-        <div className="flex gap-2 text-sm">
+        <div className="flex gap-2 text-sm items-center">
+          <CampaignStatusRefresh />
           <span className="pill">{live} vinculando à Meta</span>
           {failures > 0 && <span className="pill pill-refunded">{failures} com falha</span>}
         </div>
