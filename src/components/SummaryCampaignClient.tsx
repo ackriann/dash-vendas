@@ -23,6 +23,13 @@ type Details = {
   fetchedAt: string;
 };
 type Filter = "all" | "active" | "paused" | "issues";
+type Col = "status" | "spend" | "sales" | "roas";
+const COLUMN_OPTIONS: { id: Col; label: string }[] = [
+  { id: "status", label: "Status" },
+  { id: "spend", label: "Gastos" },
+  { id: "sales", label: "Vendas" },
+  { id: "roas", label: "ROAS" },
+];
 
 function tone(row: AdRow): "active" | "paused" | "issues" {
   if (row.status && row.status !== "ACTIVE") return "paused";
@@ -274,6 +281,22 @@ export default function SummaryCampaignClient({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [show10, setShow10] = useState(false);
+  const [columns, setColumns] = useState<Col[]>(["status", "spend", "sales", "roas"]);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("resumo:campaign-columns") || "null");
+      if (Array.isArray(saved)) {
+        const valid = COLUMN_OPTIONS.map((option) => option.id).filter((id) => saved.includes(id));
+        if (valid.length) setColumns(valid);
+      }
+    } catch { /* navegador sem armazenamento: usa padrão */ }
+  }, []);
+  const toggleColumn = (col: Col) => {
+    const next = columns.includes(col) ? columns.filter((v) => v !== col) : [...columns, col];
+    if (!next.length) return; // Sempre manter ao menos um indicador, além do nome.
+    setColumns(next);
+    try { localStorage.setItem("resumo:campaign-columns", JSON.stringify(next)); } catch { /* opcional */ }
+  };
   const [selected, setSelected] = useState<AdRow | null>(() =>
     rows.find((row) => row.id === startDetailId) ?? null);
   const [refreshing, startRefresh] = useTransition();
@@ -338,6 +361,31 @@ export default function SummaryCampaignClient({
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <details className="relative">
+          <summary className="btn btn-sm cursor-pointer">Personalizar colunas ({columns.length})</summary>
+          <div className="absolute right-0 top-full mt-2 z-30 panel p-3 w-52 shadow-xl space-y-2">
+            <p className="text-xs text-muted">Mostrar no quadro</p>
+            {COLUMN_OPTIONS.map((option) => (
+              <label key={option.id} className="flex items-center gap-2 cursor-pointer text-sm py-0.5">
+                <input type="checkbox" checked={columns.includes(option.id)}
+                  disabled={columns.length === 1 && columns.includes(option.id)}
+                  onChange={() => toggleColumn(option.id)} />
+                {option.label}
+              </label>
+            ))}
+            <button type="button" className="btn btn-sm w-full"
+              onClick={() => {
+                const all = COLUMN_OPTIONS.map((option) => option.id);
+                setColumns(all);
+                try { localStorage.setItem("resumo:campaign-columns", JSON.stringify(all)); } catch { /* opcional */ }
+              }}>
+              Restaurar padrão
+            </button>
+          </div>
+        </details>
+      </div>
+
       {partialErrors.length > 0 && (
         <div className="notice notice-warn text-sm" role="alert">
           A Meta não retornou todas as contas. Os resultados podem estar incompletos.
@@ -352,10 +400,10 @@ export default function SummaryCampaignClient({
           <thead>
             <tr>
               <th>Campanha</th>
-              <th>Status</th>
-              <th className="r">Gasto</th>
-              <th className="r hidden sm:table-cell">Vendas</th>
-              <th className="r">ROAS</th>
+              {columns.includes("status") && <th>Status</th>}
+              {columns.includes("spend") && <th className="r">Gasto</th>}
+              {columns.includes("sales") && <th className="r hidden sm:table-cell">Vendas</th>}
+              {columns.includes("roas") && <th className="r">ROAS</th>}
               <th className="r">Ação</th>
             </tr>
           </thead>
@@ -372,10 +420,10 @@ export default function SummaryCampaignClient({
                     </button>
                     <p className="text-xs text-muted truncate">{readableLabel(row.accountName)} · {row.id}</p>
                   </td>
-                  <td><StatusMark row={row} /></td>
-                  <td className="r num text-sm text-spend">{fmtMoney(row.spend, currency)}</td>
-                  <td className="r num text-sm hidden sm:table-cell">{fmtNum(row.sales)}</td>
-                  <td className="r num text-sm">{roas}</td>
+                  {columns.includes("status") && <td><StatusMark row={row} /></td>}
+                  {columns.includes("spend") && <td className="r num text-sm text-spend">{fmtMoney(row.spend, currency)}</td>}
+                  {columns.includes("sales") && <td className="r num text-sm hidden sm:table-cell">{fmtNum(row.sales)}</td>}
+                  {columns.includes("roas") && <td className="r num text-sm">{roas}</td>}
                   <td className="r">
                     <form action={toggleStatus}>
                       <input type="hidden" name="id" value={row.id} />
@@ -394,7 +442,7 @@ export default function SummaryCampaignClient({
               );
             })}
             {visible.length === 0 && <tr>
-              <td colSpan={6} className="text-center py-6 text-muted">
+              <td colSpan={columns.length + 2} className="text-center py-6 text-muted">
                 Nenhuma campanha corresponde à pesquisa ou aos filtros.
               </td>
             </tr>}
