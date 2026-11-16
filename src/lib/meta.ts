@@ -77,11 +77,16 @@ export async function graphAll<T = any>(path: string, params: Params, auth: Meta
   while (res.paging?.next && pages < maxPages) {
     const next = new URL(res.paging.next);
     for (const [k, v] of Object.entries(authParams(auth))) if (v) next.searchParams.set(k, String(v));
-    const r = await fetch(next, { cache: "no-store" });
-    res = await r.json();
-    if ((res as any).error) break;
+    const response = await fetch(next, { cache: "no-store" });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json.error) throw toError(json, response.status);
+    res = json as { data: T[]; paging?: { next?: string } };
     out.push(...(res.data ?? []));
     pages++;
+  }
+  // Nunca apresentar uma soma parcial como se fosse o total do Gerenciador.
+  if (res.paging?.next) {
+    throw new MetaError(`A consulta da Meta ainda possui páginas após ${maxPages} requisições. Relatório incompleto; reduza o período/filtros.`);
   }
   return out;
 }
@@ -280,7 +285,7 @@ export async function getInsights(auth: MetaAuth, accountId: string, level: Leve
     "spend", "impressions", "reach", "frequency", "clicks", "inline_link_clicks", "cpm", "cpc", "ctr",
     "actions", "action_values", "video_play_actions",
   ].join(",");
-  const rows = await graphAll<any>(`${accountId}/insights`, { level, fields, time_range: { since, until } }, auth);
+  const rows = await graphAll<any>(`${accountId}/insights`, { level, fields, time_range: { since, until } }, auth, 60);
   return rows.map((r) => ({
     id: r[idField],
     name: r[nameField],
@@ -355,7 +360,7 @@ export async function listObjects(auth: MetaAuth, accountId: string, level: Leve
   return graphAll<AdObject>(
     `${accountId}/${EDGE[level]}`,
     { fields, filtering: [{ field: "effective_status", operator: "NOT_IN", value: ["DELETED", "ARCHIVED"] }] },
-    auth,
+    auth, 60,
   );
 }
 
