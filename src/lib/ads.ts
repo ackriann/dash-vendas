@@ -61,7 +61,7 @@ export interface AdRowsResult {
 }
 
 /** Monta as linhas de um nível. Para "account", agrega as campanhas de cada conta. */
-export async function buildAdRows(ctx: Context, accounts: SelectedAccount[], level: AdLevel, range: DateRange): Promise<AdRowsResult> {
+export async function buildAdRows(ctx: Context, accounts: SelectedAccount[], level: AdLevel, range: DateRange, existingSales?: SaleLite[]): Promise<AdRowsResult> {
   const apiLevel: Level = level === "account" ? "campaign" : level;
   const errors: string[] = [];
   const rows = new Map<string, AdRow>();
@@ -69,7 +69,7 @@ export async function buildAdRows(ctx: Context, accounts: SelectedAccount[], lev
   const conv = (v: number, cur: string) => toBase(v, cur, ctx.base, ctx.rates);
 
   const [salesList] = await Promise.all([
-    loadSales(range),
+    existingSales ? Promise.resolve(existingSales) : loadSales(range, ctx.dash),
     ...accounts.map(async (acc) => {
       const base = { accountId: acc.id, accountName: acc.name, accountCurrency: acc.currency, profileName: acc.profile_name, level: apiLevel as AdLevel };
       try {

@@ -43,8 +43,10 @@ export async function newDraftAction(formData: FormData) {
     .select("id")
     .single();
   if (error) go("/automacao", "erro", /auto_drafts/.test(error.message) ? "Rode a migração 005_automacao.sql no Supabase." : error.message);
-  redirect(str(formData, "surface") === "campanhas"
-    ? `/campanhas?painel=criar&rascunho=${data.id}`
+  const surface = str(formData, "surface");
+  redirect(surface === "resumo"
+    ? `/?painel=criar&rascunho=${data.id}`
+    : surface === "campanhas" ? `/campanhas?painel=criar&rascunho=${data.id}`
     : `/automacao/criar?rascunho=${data.id}`);
 }
 
@@ -98,8 +100,10 @@ export async function duplicateDraftAction(formData: FormData) {
     .select("id")
     .single();
   if (error) go("/automacao", "erro", error.message);
-  redirect(str(formData, "surface") === "campanhas"
-    ? `/campanhas?painel=criar&rascunho=${row.id}`
+  const surface = str(formData, "surface");
+  redirect(surface === "resumo"
+    ? `/?painel=criar&rascunho=${row.id}`
+    : surface === "campanhas" ? `/campanhas?painel=criar&rascunho=${row.id}`
     : `/automacao/criar?rascunho=${row.id}`);
 }
 

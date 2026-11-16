@@ -14,7 +14,12 @@ import FixPanel from "./FixPanel";
 
 type SP = Promise<{ ok?: string; erro?: string; de?: string; catalogo?: string; perfil?: string }>;
 
-export default async function Processo({ params, searchParams, embedded = false }: { params: Promise<{ id: string }>; searchParams: SP; embedded?: boolean }) {
+export default async function Processo({ params, searchParams, embedded = false, embeddedSurface }: {
+  params: Promise<{ id: string }>;
+  searchParams: SP;
+  embedded?: boolean;
+  embeddedSurface?: "resumo" | "campanhas";
+}) {
   const { id } = await params;
   const sp = await searchParams;
   if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
@@ -64,7 +69,7 @@ export default async function Processo({ params, searchParams, embedded = false 
 
   return (
     <div className="space-y-4">
-      <p className="text-sm"><Link className="text-muted hover:text-ink" href={embedded ? "/campanhas?painel=status" : "/automacao/processos"}>← {embedded ? "Status das campanhas" : "Processos"}</Link></p>
+      <p className="text-sm"><Link className="text-muted hover:text-ink" href={embedded ? embeddedSurface === "resumo" ? "/?painel=status" : "/campanhas?painel=status" : "/automacao/processos"}>← {embedded ? "Status das campanhas" : "Processos"}</Link></p>
       <Notice ok={sp.ok} erro={sp.erro} />
       <RunProgress initial={run} back={back} hasPendingVideos={hasPendingVideos}
         initialVideoUpdates={videoUpdates} canRecoverCatalog={canRecoverCatalog}

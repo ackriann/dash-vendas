@@ -1,16 +1,39 @@
 "use server";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/session";
-import { duplicateObject, setDailyBudget, setObjectStatus, type Level } from "@/lib/meta";
+import { duplicateObject, graph, setDailyBudget, setObjectStatus, type Level, type MetaAuth } from "@/lib/meta";
 import { authForAccount } from "@/lib/profiles";
 import { parseMoneyInput } from "@/lib/money";
 
 function back(url: string, key: "ok" | "erro", msg: string): never {
-  const u = new URL(url.startsWith("/") ? url : "/campanhas", "http://x");
+  // Links de retorno só podem permanecer em telas do próprio painel.
+  const u = new URL(url.startsWith("/") && !url.startsWith("//") ? url : "/campanhas", "http://x");
+  if (!["/campanhas", "/"].includes(u.pathname)) {
+    u.pathname = "/campanhas";
+    u.search = "";
+  }
   u.searchParams.delete("ok");
   u.searchParams.delete("erro");
   u.searchParams.set(key, msg);
   redirect(`${u.pathname}?${u.searchParams}`);
+}
+
+/** Confere o vínculo Meta entre objeto e conta do workspace antes de mutar o objeto.
+ * Evita que um ID informado em formulário altere campanha de outra conta.
+ */
+async function verifiedAuth(accountId: string, objectId: string): Promise<MetaAuth> {
+  if (!/^act_\d+$/.test(accountId) || !/^\d+$/.test(objectId)) {
+    throw new Error("Conta ou objeto Meta inválido.");
+  }
+  const auth = await authForAccount(accountId);
+  const obj = await graph<{ account_id?: string }>(objectId, {
+    params: { fields: "account_id" }, auth,
+  });
+  if (!obj.account_id ||
+      String(obj.account_id).replace(/^act_/, "") !== accountId.replace(/^act_/, "")) {
+    throw new Error("Esta campanha ou conjunto não pertence à conta selecionada.");
+  }
+  return auth;
 }
 
 export async function toggleStatus(formData: FormData) {
@@ -19,7 +42,7 @@ export async function toggleStatus(formData: FormData) {
   const next = String(formData.get("next")) === "ACTIVE" ? "ACTIVE" : "PAUSED";
   const url = String(formData.get("back") ?? "/campanhas");
   try {
-    await setObjectStatus(await authForAccount(String(formData.get("account"))), id, next);
+    await setObjectStatus(await verifiedAuth(String(formData.get("account")), id), id, next);
   } catch (e: any) {
     back(url, "erro", e?.message ?? "Falha ao alterar status");
   }
@@ -33,7 +56,7 @@ export async function updateBudget(formData: FormData) {
   const url = String(formData.get("back") ?? "/campanhas");
   if (!(amount > 0)) back(url, "erro", "Informe um orçamento válido.");
   try {
-    await setDailyBudget(await authForAccount(String(formData.get("account"))), id, amount);
+    await setDailyBudget(await verifiedAuth(String(formData.get("account")), id), id, amount);
   } catch (e: any) {
     back(url, "erro", e?.message ?? "Falha ao alterar orçamento");
   }
@@ -47,7 +70,7 @@ export async function duplicate(formData: FormData) {
   const url = String(formData.get("back") ?? "/campanhas");
   if (!["campaign", "adset", "ad"].includes(level)) back(url, "erro", "Nível inválido.");
   try {
-    await duplicateObject(await authForAccount(String(formData.get("account"))), id, level);
+    await duplicateObject(await verifiedAuth(String(formData.get("account")), id), id, level);
   } catch (e: any) {
     back(url, "erro", e?.message ?? "Falha ao duplicar");
   }

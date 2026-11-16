@@ -6,8 +6,8 @@ import AccountMultiPicker, { defaultCampaignAccounts } from "@/components/automa
 import { newDraftAction } from "@/app/(painel)/automacao/actions";
 
 export default function AccountLaunchForm({
-  accounts, embedded = false,
-}: { accounts: AccountLite[]; embedded?: boolean }) {
+  accounts, embedded = false, embeddedSurface,
+}: { accounts: AccountLite[]; embedded?: boolean; embeddedSurface?: "resumo" | "campanhas" }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(() => defaultCampaignAccounts(accounts));
   const [primaryId, setPrimaryId] = useState(() => defaultCampaignAccounts(accounts)[0] ?? "");
 
@@ -17,7 +17,7 @@ export default function AccountLaunchForm({
   }
   return (
     <form action={newDraftAction} className="panel panel-pad grid gap-4 max-w-4xl">
-      {embedded && <input type="hidden" name="surface" value="campanhas" />}
+      {embedded && <input type="hidden" name="surface" value={embeddedSurface ?? "campanhas"} />}
       <div>
         <h2 className="text-base font-semibold">Escolha as contas da campanha</h2>
         <p className="text-sm text-muted mt-1">
