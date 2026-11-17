@@ -12,7 +12,9 @@ function go(key: "ok" | "erro", msg: string, formData?: FormData): never {
 const field = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
 export async function addProfile(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   let msg = "";
   try {
@@ -34,7 +36,9 @@ export async function addProfile(formData: FormData) {
 
 /** Troca o token (e, se informado, o app) de um perfil existente. */
 export async function replaceToken(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   const id = field(formData, "id");
   const p = await getProfile(id);
@@ -58,7 +62,9 @@ export async function replaceToken(formData: FormData) {
 }
 
 export async function checkProfile(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   const p = await getProfile(field(formData, "id"));
   if (!p) finish("erro", "Perfil não encontrado.");
@@ -68,7 +74,9 @@ export async function checkProfile(formData: FormData) {
 }
 
 export async function syncProfile(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   const p = await getProfile(field(formData, "id"));
   if (!p) finish("erro", "Perfil não encontrado.");
@@ -82,7 +90,9 @@ export async function syncProfile(formData: FormData) {
 }
 
 export async function renameProfile(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   const name = field(formData, "name");
   if (!name) finish("erro", "Dê um nome ao perfil.");
@@ -91,14 +101,18 @@ export async function renameProfile(formData: FormData) {
 }
 
 export async function removeProfile(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   await db().from("meta_profiles").delete().eq("id", field(formData, "id"));
   finish("ok", "Perfil removido (as contas dele saíram do painel).");
 }
 
 export async function saveAccounts(formData: FormData) {
-  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
+  function finish(key: "ok" | "erro", msg: string): never {
+    return go(key, msg, formData);
+  }
   await requireAuth();
   const profileId = field(formData, "id");
   const chosen = formData.getAll("account").map(String);
