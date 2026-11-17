@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type CheckoutChoice = { name: string; status: string; ready: boolean };
 
@@ -9,6 +9,13 @@ export default function CheckoutPicker({
 }: { options: CheckoutChoice[]; panels: ReactNode[] }) {
   const [selected, setSelected] = useState(() => options.findIndex((v) => v.ready) >= 0
     ? options.findIndex((v) => v.ready) : 0);
+  useEffect(() => {
+    try {
+      const name = sessionStorage.getItem("dash-vendas:checkout-selecionado");
+      const index = options.findIndex((item) => item.name === name);
+      if (index >= 0) setSelected(index);
+    } catch { /* armazenamento desativado */ }
+  }, [options.map((o) => o.name).join("|")]);
   const picked = options[selected];
 
   return (
@@ -20,7 +27,12 @@ export default function CheckoutPicker({
       <label className="field">
         <span className="label">Selecionar checkout</span>
         <select className="select" value={selected}
-          onChange={(event) => setSelected(Number(event.target.value))}>
+          onChange={(event) => {
+            const index = Number(event.target.value);
+            setSelected(index);
+            try { sessionStorage.setItem("dash-vendas:checkout-selecionado", options[index]?.name ?? ""); }
+            catch { /* armazenamento desativado */ }
+          }}>
           {options.map((item, index) => (
             <option value={index} key={item.name}>{item.name}{item.ready ? " · conectado" : ""}</option>
           ))}
