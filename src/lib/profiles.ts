@@ -244,7 +244,7 @@ export async function connectProfile(input: ConnectInput, existingId?: string): 
   return { profile: saved as MetaProfile, missing: v.missing, accounts };
 }
 
-/** Puxa as contas de anúncio do perfil. Contas novas entram desligadas; as que sumiram saem. */
+/** Puxa as contas do perfil. Novas contas ficam disponíveis no assistente, mas não são adicionadas em massa ao Resumo. */
 export async function syncAccounts(profile: MetaProfile): Promise<number> {
   const list = await listAdAccounts(authOf(profile));
   const { data: current } = await db().from("ad_accounts").select("id,profile_id,enabled");
