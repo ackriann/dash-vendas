@@ -1,38 +1,28 @@
-import Link from "next/link";
-import { db, getSetting } from "@/lib/db";
 import { env } from "@/lib/env";
 import { fmtDateTime } from "@/lib/dates";
 import { getPixels } from "@/lib/capi";
+import IntegrationProfiles from "@/components/IntegrationProfiles";
+import CheckoutPicker from "@/components/CheckoutPicker";
+import { RECOMMENDED_UTM } from "@/lib/utm";
+import { pixelCodeSnippet } from "@/lib/pixel-code";
 import { getCheckoutSecrets } from "@/lib/checkouts";
 import { currentWorkspace, withWorkspace } from "@/lib/workspaces";
-import { listDashboards } from "@/lib/dashboards";
-import PixelCodes from "@/components/PixelCodes";
 import { ipnInfo, ipnUrl as digistoreIpnUrl, type IpnInfo } from "@/lib/digistore";
 import { HEALTH_PILL, webhookHealth, type Health } from "@/lib/webhook-health";
 import Notice from "@/components/Notice";
 import CopyButton from "@/components/CopyButton";
 import SubmitButton from "@/components/SubmitButton";
 import Help from "@/components/Help";
-import Acc from "@/components/Acc";
 import {
   addPixel, clearCheckout, connectDigistore, connectStripe, disconnectDigistore, deletePixel, disconnectStripe, newUniversalKey, saveDigistore,
-  saveCooud, saveHotmart, saveStripeManual, setAutoCapi, setDefaultPixel, updatePixelTestCode,
+  saveCooud, saveHotmart, saveStripeManual,
 } from "./actions";
 
 export default async function Integracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
   const sp = await searchParams;
   const ws = await currentWorkspace();
   const pub = (path: string) => withWorkspace(`${env.appUrl}${path}`, ws);
-  const dashes = await listDashboards();
-  const [profiles, accounts, pixels, autoCapi, logs, checkout] = await Promise.all([
-    db().from("meta_profiles").select("id"),
-    db().from("ad_accounts").select("id", { count: "exact", head: true }).eq("enabled", true),
-    getPixels(),
-    getSetting<boolean>("auto_capi", false),
-    db().from("events_log").select("*").order("created_at", { ascending: false }).limit(15),
-    getCheckoutSecrets(),
-  ]).then(([p, a, ...rest]) => [p.data ?? [], a.count ?? 0, ...rest] as const);
-  const enabledAccounts = accounts;
+  const [pixels, checkout] = await Promise.all([getPixels(), getCheckoutSecrets()]);
 
   const tail = (v: string) => `…${v.slice(-6)}`;
   const universalUrl = pub(`/api/webhooks/universal?key=${checkout.universalKey || "GERE_A_CHAVE"}&platform=kiwify`);
@@ -293,194 +283,111 @@ export default async function Integracoes({ searchParams }: { searchParams: Prom
   ];
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6">
       <header>
         <h1>Integrações</h1>
-        <p className="sub">Meta, pixel e checkouts. Clique em cada item para abrir.</p>
+        <p className="sub">Perfil Meta, Pixel e UTM e Checkout — tudo em um único lugar.</p>
       </header>
       <Notice ok={sp.ok} erro={sp.erro} />
 
-      {/* ------------------------------------------------ Meta e rastreamento */}
-      <section>
-        <h2 className="mb-3">Meta</h2>
-        <div className="acc">
-          <Link href="/perfis" className="flex items-center gap-3 px-4 py-3.5 rounded-[14px] hover:bg-[#18303a]">
-            <span className="flex-1 min-w-0">
-              <span className="acc-title">Perfis e contas de anúncio</span>
-              <span className="acc-sub">
-                {profiles.length ? `${profiles.length} perfil(is) · ${enabledAccounts} conta(s) no painel` : "Nenhum perfil conectado"}
-              </span>
-            </span>
-            <span className={`pill ${profiles.length ? "pill-approved" : "pill-pending"}`}>{profiles.length ? "Conectado" : "Conectar"}</span>
-          </Link>
-        </div>
-        <div className="acc">
-          <Link href="/utms" className="flex items-center gap-3 px-4 py-3.5 rounded-[14px] hover:bg-[#18303a]">
-            <span className="flex-1 min-w-0">
-              <span className="acc-title">UTMs e script de rastreamento</span>
-              <span className="acc-sub">Parâmetros dos anúncios e gerador de links</span>
-            </span>
-            <span className="text-muted" aria-hidden>→</span>
-          </Link>
-        </div>
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-3 items-start gap-4">
+        <IntegrationProfiles />
 
-      {/* ------------------------------------------------ Pixels */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <h2>Pixel</h2>
-          <Help title="Como funciona o pixel do painel">
-            <ul>
-              <li>O <b>código do pixel</b> vai no &lt;head&gt; de todas as páginas (presell, vendas, obrigado), <b>no lugar</b> do código do pixel da Meta.</li>
-              <li>Ele carrega o pixel e manda <b>PageView, ViewContent e InitiateCheckout</b> pelo navegador e pelo servidor, sem contar duas vezes.</li>
-              <li>Também guarda as UTMs da visita e passa para o checkout, para a venda cair na campanha certa.</li>
-              <li>O <b>Purchase</b> vai pelo servidor quando o checkout aprova a venda (com o envio automático ligado) ou pelo botão “Disparar venda no pixel”.</li>
-              <li>A Meta aceita eventos de até 7 dias e não conta a mesma venda duas vezes.</li>
-            </ul>
-          </Help>
-        </div>
-        {pixels.length > 0 && (
-          <Acc
-            title="Código do pixel para o site"
-            sub={dashes.length ? "Um código por dash: carrega todos os pixels ligados ao dash" : "Um código só: carrega todos os pixels da conta"}
-            open
-            right={
-              <Help title="Onde colar o código">
-                <ol>
-                  <li>Copie o código do dash do produto (ou o da conta).</li>
-                  <li>Cole no &lt;head&gt; de <b>todas</b> as páginas: presell, vendas e obrigado.</li>
-                  <li><b>Tire o código antigo do pixel da Meta</b> dessas páginas (inclusive de plugin ou construtor de página), senão o PageView conta em dobro.</li>
-                  <li>Para trocar os pixels de um dash, edite em <b>Dashes</b>: o código no site continua o mesmo.</li>
-                </ol>
-              </Help>
-            }
-          >
-            <PixelCodes accountCode={ws.pixel_code} dashes={dashes} pixels={pixels} />
-          </Acc>
-        )}
-        {pixels.map((p) => (
-          <Acc
-            key={p.id}
-            title={p.name}
-            sub={`ID ${p.pixel_id} · token …${p.access_token.slice(-6)}${p.test_event_code ? ` · teste ${p.test_event_code}` : ""}`}
-            right={p.is_default ? <span className="pill pill-approved">padrão</span> : undefined}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <form action={updatePixelTestCode} className="flex gap-1 items-center">
-                <input type="hidden" name="id" value={p.id} />
-                <input className="input !h-8 !w-32 text-sm" name="test_event_code" defaultValue={p.test_event_code ?? ""} placeholder="TEST1234" aria-label="Código de evento de teste" />
-                <SubmitButton className="btn btn-sm" pendingText="…">Salvar teste</SubmitButton>
-                <Help title="Código de teste">
-                  <p>Para ver os eventos chegando sem afetar as campanhas:</p>
-                  <ol>
-                    <li>Gerenciador de Eventos → seu pixel → <b>Eventos de teste</b>.</li>
-                    <li>Copie o código (ex.: TEST1234), cole aqui e salve.</li>
-                    <li>Os eventos aparecem lá marcados como Navegador e Servidor.</li>
-                    <li><b>Apague o código depois</b>: enquanto ele estiver salvo, os eventos não contam para as campanhas.</li>
-                  </ol>
-                </Help>
-              </form>
-              <div className="flex gap-1 ml-auto">
-                {!p.is_default && (
-                  <form action={setDefaultPixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm">Tornar padrão</SubmitButton></form>
-                )}
-                <form action={deletePixel}><input type="hidden" name="id" value={p.id} /><SubmitButton className="btn btn-sm btn-danger" confirm={`Remover o pixel ${p.name}?`}>Remover</SubmitButton></form>
-              </div>
-            </div>
-          </Acc>
-        ))}
-        <Acc
-          title="Envio automático do Purchase"
-          sub={dashes.length ? "Venda aprovada vai pelo servidor para os pixels do dash do produto" : "Toda venda aprovada vai para o pixel padrão pelo servidor"}
-          right={<span className={`pill ${autoCapi ? "pill-approved" : ""}`}>{autoCapi ? "Ligado" : "Desligado"}</span>}
-        >
-          <form action={setAutoCapi} className="flex items-center gap-3">
-            <input type="hidden" name="auto" value={String(!autoCapi)} />
-            <SubmitButton className={autoCapi ? "btn" : "btn btn-primary"} pendingText="…">{autoCapi ? "Desligar" : "Ligar"}</SubmitButton>
-            <span className="text-sm text-muted">Recomendado ligado: a Meta recebe só as compras pagas de verdade.</span>
-          </form>
-        </Acc>
-        <Acc title="Adicionar pixel" sub="ID do pixel + token da API de Conversões" open={!pixels.length}>
-          <form action={addPixel} className="grid sm:grid-cols-2 gap-3">
-            <label className="field"><span className="label">Nome</span><input className="input" name="name" placeholder="Pixel principal" /></label>
-            <label className="field"><span className="label">ID do pixel</span><input className="input num" name="pixel_id" inputMode="numeric" required /></label>
-            <label className="field sm:col-span-2">
-              <span className="label flex items-center gap-2">
-                Token da API de Conversões
-                <Help title="Onde pegar o token">
-                  <ol>
-                    <li>Abra o <b>Gerenciador de Eventos</b> da Meta.</li>
-                    <li>Escolha o pixel → <b>Configurações</b>.</li>
-                    <li>Em <b>API de Conversões</b>, clique em <b>Gerar token de acesso</b> e copie.</li>
-                  </ol>
-                </Help>
-              </span>
-              <input className="input mono" name="access_token" required />
-            </label>
-            <label className="field"><span className="label">Código de teste (opcional)</span><input className="input" name="test_event_code" placeholder="TEST1234" /></label>
-            <div className="flex items-end"><SubmitButton className="btn btn-primary" pendingText="Salvando…">Adicionar pixel</SubmitButton></div>
-          </form>
-        </Acc>
-      </section>
-
-      {/* ------------------------------------------------ Webhooks */}
-      <section>
-        <h2 className="mb-3">Checkouts</h2>
-        {hooks.map((h) => (
-          <Acc
-            key={h.name}
-            title={h.name}
-            sub={h.status}
-            open={h.health.state === "error"}
-            right={
-              <>
-                <Help title={`Como conectar ${h.name}`}>
-                  <ol>{h.steps.map((s) => <li key={s}>{s}</li>)}</ol>
-                  {h.example && (
-                    <>
-                      <p>Formato do JSON, se precisar montar:</p>
-                      <code className="codebox !text-[0.72rem]">{h.example}</code>
-                    </>
-                  )}
-                </Help>
-                <span className={`pill ${HEALTH_PILL[h.health.state].cls}`}>{HEALTH_PILL[h.health.state].label}</span>
-              </>
-            }
-          >
-            {h.checks.length > 0 && <Checklist checks={h.checks} />}
-            <div>
-              <p className="label">URL do webhook</p>
-              <div className="flex gap-2 items-start">
-                <code className="codebox flex-1">{h.url}</code>
-                <CopyButton text={h.url} />
-              </div>
-            </div>
-            {h.connect}
-          </Acc>
-        ))}
-      </section>
-
-      {/* ------------------------------------------------ Log */}
-      <section>
-        <Acc title="Últimos eventos recebidos" sub={`${logs.data?.length ?? 0} mais recentes`}>
-          <div className="overflow-x-auto -m-4">
-            <table className="tbl min-w-[600px]">
-              <thead><tr><th>Quando</th><th>Origem</th><th>Evento</th><th>Resultado</th></tr></thead>
-              <tbody>
-                {(logs.data ?? []).map((l: any) => (
-                  <tr key={l.id}>
-                    <td className="whitespace-nowrap text-sm">{fmtDateTime(l.created_at, env.timezone)}</td>
-                    <td className="text-sm">{l.source}</td>
-                    <td className="text-sm mono">{l.kind}</td>
-                    <td className={`text-sm ${l.ok ? "" : "neg"}`}>{l.message ?? (l.ok ? "ok" : "erro")}</td>
-                  </tr>
-                ))}
-                {!logs.data?.length && <tr><td colSpan={4} className="text-center text-muted py-6">Nada recebido ainda.</td></tr>}
-              </tbody>
-            </table>
+        <section id="rastreamento" className="rounded-2xl border border-line bg-surface p-4 sm:p-5 min-w-0 space-y-5">
+          <div>
+            <h2>Pixel e UTM</h2>
+            <p className="text-sm text-muted mt-1">Cadastre o pixel e copie os dois códigos de rastreamento.</p>
           </div>
-        </Acc>
-      </section>
+
+          <div className="space-y-3 rounded-xl bg-[#10232b] border border-line p-3 sm:p-4">
+            <h3 className="font-semibold">Pixel</h3>
+            <form action={addPixel} className="space-y-3">
+              <label className="field">
+                <span className="label">Nome</span>
+                <input className="input" name="name" placeholder="Pixel principal" required />
+              </label>
+              <label className="field">
+                <span className="label">ID do pixel</span>
+                <input className="input mono" name="pixel_id" inputMode="numeric" placeholder="123456789012345" required />
+              </label>
+              <label className="field">
+                <span className="label">Token da API de Conversões</span>
+                <input className="input mono" name="access_token" type="password" autoComplete="new-password"
+                  placeholder="Token de acesso do pixel" required />
+              </label>
+              <SubmitButton className="btn btn-primary" pendingText="Salvando…">Salvar pixel</SubmitButton>
+            </form>
+            {pixels.length > 0 && (
+              <ul className="space-y-2 pt-3 border-t border-line">
+                {pixels.map((p) => (
+                  <li key={p.id} className="flex flex-wrap gap-2 items-center justify-between rounded-lg border border-line p-2.5">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm break-words">{p.name}</p>
+                      <p className="text-xs text-muted break-all">ID {p.pixel_id} · token •••{p.access_token.slice(-4)}{p.is_default ? " · padrão" : ""}</p>
+                    </div>
+                    <form action={deletePixel}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <SubmitButton className="btn btn-sm btn-danger" confirm={`Remover o pixel ${p.name}? A coleta dos eventos vinculados a ele será interrompida.`}>Remover</SubmitButton>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="font-semibold">UTM</h3>
+            <div className="rounded-xl border border-line bg-[#10232b] p-3 space-y-2">
+              <p className="font-medium text-sm">1. Parâmetros dos anúncios</p>
+              <p className="text-xs text-muted">Cole em Rastreamento → Parâmetros de URL, no anúncio da Meta.</p>
+              <code className="codebox block text-xs max-h-44 overflow-auto">{RECOMMENDED_UTM}</code>
+              <CopyButton text={RECOMMENDED_UTM} label="Copiar UTM 1" />
+            </div>
+            <div className="rounded-xl border border-line bg-[#10232b] p-3 space-y-2">
+              <p className="font-medium text-sm">2. Código de rastreamento na página</p>
+              <p className="text-xs text-muted">Cole no &lt;head&gt; da página. O script registra UTMs e usa os pixels configurados.</p>
+              <code className="codebox block text-xs max-h-44 overflow-auto">{pixelCodeSnippet(ws.pixel_code)}</code>
+              <CopyButton text={pixelCodeSnippet(ws.pixel_code)} label="Copiar UTM 2" />
+              {!pixels.length && <p className="text-xs text-spend">Cadastre um pixel acima para enviar eventos à Meta.</p>}
+            </div>
+          </div>
+        </section>
+
+        <CheckoutPicker
+          options={hooks.map((h) => ({
+            name: h.name,
+            status: HEALTH_PILL[h.health.state].label,
+            ready: h.health.state !== "off" || Boolean(h.status),
+          }))}
+          panels={hooks.map((h) => (
+            <div key={h.name} className="space-y-3">
+              {h.checks.length > 0 && <Checklist checks={h.checks} />}
+              <div>
+                <p className="label">URL do webhook</p>
+                <div className="flex gap-2 items-start">
+                  <code className="codebox flex-1 !text-[0.75rem]">{h.url}</code>
+                  <CopyButton text={h.url} label="Copiar URL" />
+                </div>
+              </div>
+              {h.connect}
+              <details className="border-t border-line pt-3">
+                <summary className="text-sm font-medium text-muted cursor-pointer">
+                  Como configurar {h.name}
+                </summary>
+                <ol className="list-decimal text-sm text-muted pl-5 mt-2 space-y-2">
+                  {h.steps.map((step) => <li key={step}>{step}</li>)}
+                </ol>
+                {h.example && (
+                  <div className="space-y-2 mt-3">
+                    <p className="label">Exemplo JSON</p>
+                    <code className="codebox !text-[0.72rem] max-h-60 overflow-auto">{h.example}</code>
+                  </div>
+                )}
+              </details>
+            </div>
+          ))}
+        />
+      </div>
     </div>
   );
 }
