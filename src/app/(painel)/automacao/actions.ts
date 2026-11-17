@@ -43,6 +43,13 @@ export async function newDraftAction(formData: FormData) {
     .select("id")
     .single();
   if (error) go("/automacao", "erro", /auto_drafts/.test(error.message) ? "Rode a migração 005_automacao.sql no Supabase." : error.message);
+  // As contas são escolhidas explicitamente ao iniciar a campanha, não no
+  // formulário do perfil. Somente as selecionadas passam a integrar o painel.
+  const { error: enableError } = await db().from("ad_accounts")
+    .update({ enabled: true }).in("id", selected);
+  if (enableError) {
+    console.error("Não foi possível habilitar as contas escolhidas para relatórios:", enableError.message);
+  }
   const surface = str(formData, "surface");
   redirect(surface === "resumo"
     ? `/?painel=criar&rascunho=${data.id}`
