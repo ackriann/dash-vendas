@@ -244,7 +244,7 @@ export async function connectProfile(input: ConnectInput, existingId?: string): 
   return { profile: saved as MetaProfile, missing: v.missing, accounts };
 }
 
-/** Puxa as contas de anúncio do perfil. Novas contas ficam disponíveis no painel e no assistente; preferências antigas são preservadas. */
+/** Puxa as contas do perfil. Novas contas ficam disponíveis no assistente, mas não são adicionadas em massa ao Resumo. */
 export async function syncAccounts(profile: MetaProfile): Promise<number> {
   const list = await listAdAccounts(authOf(profile));
   const { data: current } = await db().from("ad_accounts").select("id,profile_id,enabled");
@@ -256,7 +256,7 @@ export async function syncAccounts(profile: MetaProfile): Promise<number> {
     currency: a.currency,
     account_status: a.account_status,
     timezone_name: a.timezone_name ?? null,
-    enabled: known.get(a.id)?.enabled ?? true,
+    enabled: known.get(a.id)?.enabled ?? false,
     updated_at: new Date().toISOString(),
   }));
   // Se outra conexão já tem essa conta, ela passa para este perfil (o token mais novo)
