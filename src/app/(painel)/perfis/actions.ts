@@ -4,13 +4,15 @@ import { requireAuth } from "@/lib/session";
 import { db, logEvent } from "@/lib/db";
 import { connectProfile, getProfile, refreshProfile, syncAccounts } from "@/lib/profiles";
 
-function go(key: "ok" | "erro", msg: string): never {
-  redirect(`/perfis?${key}=${encodeURIComponent(msg)}`);
+function go(key: "ok" | "erro", msg: string, formData?: FormData): never {
+  const base = formData?.get("surface") === "integracoes" ? "/integracoes?area=perfil&" : "/perfis?";
+  redirect(`${base}${key}=${encodeURIComponent(msg)}`);
 }
 
 const field = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
 export async function addProfile(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   let msg = "";
   try {
@@ -20,22 +22,23 @@ export async function addProfile(formData: FormData) {
       appSecret: field(formData, "app_secret"),
       token: field(formData, "token"),
     });
-    msg = `Perfil ${r.profile.name} conectado · ${r.accounts} conta(s) de anúncio encontrada(s). Ative as que entram no painel.`;
+    msg = `Perfil ${r.profile.name} conectado · ${r.accounts} conta(s) disponíveis para seleção nas campanhas.`;
     if (r.missing.length) msg += ` Sem as permissões: ${r.missing.join(", ")} (algumas funções podem não funcionar).`;
     await logEvent("meta", "perfil", true, `Perfil ${r.profile.name} conectado (app ${r.profile.app_name})`);
   } catch (e: any) {
     await logEvent("meta", "perfil", false, e?.message);
-    go("erro", e?.message ?? "Não foi possível conectar.");
+    finish("erro", e?.message ?? "Não foi possível conectar.");
   }
-  go("ok", msg);
+  finish("ok", msg);
 }
 
 /** Troca o token (e, se informado, o app) de um perfil existente. */
 export async function replaceToken(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   const id = field(formData, "id");
   const p = await getProfile(id);
-  if (!p) go("erro", "Perfil não encontrado.");
+  if (!p) finish("erro", "Perfil não encontrado.");
   let msg = "";
   try {
     const r = await connectProfile(
@@ -49,53 +52,58 @@ export async function replaceToken(formData: FormData) {
     );
     msg = `Token de ${r.profile.name} atualizado.`;
   } catch (e: any) {
-    go("erro", e?.message ?? "Token recusado.");
+    finish("erro", e?.message ?? "Token recusado.");
   }
-  go("ok", msg);
+  finish("ok", msg);
 }
 
 export async function checkProfile(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   const p = await getProfile(field(formData, "id"));
-  if (!p) go("erro", "Perfil não encontrado.");
+  if (!p) finish("erro", "Perfil não encontrado.");
   const r = await refreshProfile(p);
-  if (r.status !== "ok") go("erro", `${p.name}: ${r.last_error}`);
-  go("ok", `${p.name}: token válido${r.expires_at ? " e renovado" : " (não expira)"}.`);
+  if (r.status !== "ok") finish("erro", `${p.name}: ${r.last_error}`);
+  finish("ok", `${p.name}: token válido${r.expires_at ? " e renovado" : " (não expira)"}.`);
 }
 
 export async function syncProfile(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   const p = await getProfile(field(formData, "id"));
-  if (!p) go("erro", "Perfil não encontrado.");
+  if (!p) finish("erro", "Perfil não encontrado.");
   let n = 0;
   try {
     n = await syncAccounts(p);
   } catch (e: any) {
-    go("erro", `${p.name}: ${e?.message ?? "erro"}`);
+    finish("erro", `${p.name}: ${e?.message ?? "erro"}`);
   }
-  go("ok", `${n} conta(s) de anúncio em ${p.name}.`);
+  finish("ok", `${n} conta(s) de anúncio em ${p.name}.`);
 }
 
 export async function renameProfile(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   const name = field(formData, "name");
-  if (!name) go("erro", "Dê um nome ao perfil.");
+  if (!name) finish("erro", "Dê um nome ao perfil.");
   await db().from("meta_profiles").update({ name }).eq("id", field(formData, "id"));
-  go("ok", "Nome salvo.");
+  finish("ok", "Nome salvo.");
 }
 
 export async function removeProfile(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   await db().from("meta_profiles").delete().eq("id", field(formData, "id"));
-  go("ok", "Perfil removido (as contas dele saíram do painel).");
+  finish("ok", "Perfil removido (as contas dele saíram do painel).");
 }
 
 export async function saveAccounts(formData: FormData) {
+  const finish = (key: "ok" | "erro", msg: string): never => go(key, msg, formData);
   await requireAuth();
   const profileId = field(formData, "id");
   const chosen = formData.getAll("account").map(String);
   const supa = db();
   await supa.from("ad_accounts").update({ enabled: false }).eq("profile_id", profileId);
   if (chosen.length) await supa.from("ad_accounts").update({ enabled: true }).eq("profile_id", profileId).in("id", chosen);
-  go("ok", `${chosen.length} conta(s) ativa(s) neste perfil.`);
+  finish("ok", `${chosen.length} conta(s) ativa(s) neste perfil.`);
 }
